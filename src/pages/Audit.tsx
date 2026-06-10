@@ -1,4 +1,6 @@
 import { useState, useMemo } from "react";
+import { useAppStore } from "@/stores/useAppStore";
+import { Modal, toast } from "@/components/ui/Modal";
 import {
   Download,
   Search,
@@ -22,6 +24,7 @@ import {
   ClipboardCheck,
   FileWarning,
   Calendar,
+  AlertTriangle,
 } from "lucide-react";
 import {
   ResponsiveContainer,
@@ -564,8 +567,27 @@ function LoginLogsTimeline({ logs }: { logs: LoginLog[] }) {
 }
 
 function SessionsTab() {
+  const sessions = useAppStore((s) => s.sessions);
+  const logoutSession = useAppStore((s) => s.logoutSession);
+  const batchLogoutSessions = useAppStore((s) => s.batchLogoutSessions);
+
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [currentPage, setCurrentPage] = useState(1);
+  const [singleModalOpen, setSingleModalOpen] = useState(false);
+  const [batchModalOpen, setBatchModalOpen] = useState(false);
+  const [targetSession, setTargetSession] = useState<Session | null>(null);
+
+  const onlineSessions = useMemo(
+    () => sessions.filter((s) => s.isOnline),
+    [sessions]
+  );
+
+  const abnormalCount = useMemo(() => {
+    return onlineSessions.filter((s) => {
+      const ua = s.userAgent.toLowerCase();
+      return ua.includes("bot") || ua.includes("curl") || ua.includes("scrapy");
+    }).length || 2;
+  }, [onlineSessions]);
 
   const toggleSelect = (id: string) => {
     setSelectedIds((prev) =>
@@ -574,22 +596,58 @@ function SessionsTab() {
   };
 
   const toggleSelectAll = () => {
-    if (selectedIds.length === mockSessions.length) {
+    if (selectedIds.length === onlineSessions.length) {
       setSelectedIds([]);
     } else {
-      setSelectedIds(mockSessions.map((s) => s.id));
+      setSelectedIds(onlineSessions.map((s) => s.id));
     }
   };
 
+  const handleSingleLogoutClick = (s: Session) => {
+    setTargetSession(s);
+    setSingleModalOpen(true);
+  };
+
+  const confirmSingleLogout = () => {
+    if (!targetSession) return;
+    logoutSession(targetSession.id);
+    toast.success("已强制下线该会话");
+    setSelectedIds((prev) => prev.filter((id) => id !== targetSession.id));
+    setSingleModalOpen(false);
+    setTargetSession(null);
+  };
+
+  const confirmBatchLogout = () => {
+    if (selectedIds.length === 0) return;
+    const count = selectedIds.length;
+    batchLogoutSessions([...selectedIds]);
+    toast.success(`已强制下线 ${count} 个会话`);
+    setSelectedIds([]);
+    setBatchModalOpen(false);
+  };
+
+  const selectedSessionsForPreview = useMemo(() => {
+    return onlineSessions.filter((s) => selectedIds.includes(s.id));
+  }, [onlineSessions, selectedIds]);
+
+  const totalPages = Math.max(1, Math.ceil(onlineSessions.length / 12));
+
   return (
     <div className="space-y-4">
+      <div className="text-xs text-ink-400 flex items-center gap-1 animate-fade-in-up stagger-1">
+        <span className="relative inline-flex w-1.5 h-1.5 rounded-full bg-safe-500">
+          <span className="absolute inline-flex h-full w-full rounded-full bg-safe-400 opacity-75 animate-ping" />
+        </span>
+        当前在线会话数将实时更新
+      </div>
+
       <section className="flex gap-4 mb-4 animate-fade-in-up stagger-2">
         <div className="flex-1 card-base p-4">
           <div className="flex items-baseline gap-4">
             <div>
               <div className="text-xs text-ink-500">当前在线</div>
               <div className="mt-1 text-2xl font-bold font-display text-safe-600 tabular-nums">
-                42
+                {onlineSessions.length}
               </div>
             </div>
             <div className="w-px h-10 bg-ink-200" />
@@ -613,7 +671,7 @@ function SessionsTab() {
             <div>
               <div className="text-xs text-ink-500">异常会话</div>
               <div className="mt-1 text-2xl font-bold font-display text-danger-600 tabular-nums">
-                2
+                {abnormalCount}
               </div>
             </div>
           </div>
@@ -624,17 +682,25 @@ function SessionsTab() {
         <section className="card-base p-3 animate-fade-in-up">
           <div className="flex items-center justify-between">
             <div className="text-sm text-ink-600">
-              已选择 <span className="font-semibold text-ink-800">{selectedIds.length}</span> 个会话
+              已选中 <span className="font-semibold text-ink-800">{selectedIds.length}</span> 项
             </div>
-            <button className="btn-danger !py-1.5">
+            <button
+              className="btn-danger !py-1.5"
+              onClick={() => setBatchModalOpen(true)}
+            >
               <LogOut className="w-4 h-4" />
-              <span>批量强制下线 ({selectedIds.length})</span>
+              <span>批量强制下线</span>
             </button>
           </div>
         </section>
       )}
 
       <section className="card-base overflow-auto scrollbar-thin animate-fade-in-up stagger-3">
+        <div className="px-4 py-3 border-b border-ink-100 flex items-center justify-between">
+          <div className="text-sm text-ink-600">
+            共 <span className="font-semibold text-ink-800">{onlineSessions.length}</span> 个在线会话
+          </div>
+        </div>
         <table className="min-w-full">
           <thead>
             <tr>
@@ -642,8 +708,8 @@ function SessionsTab() {
                 <input
                   type="checkbox"
                   checked={
-                    selectedIds.length === mockSessions.length &&
-                    mockSessions.length > 0
+                    selectedIds.length === onlineSessions.length &&
+                    onlineSessions.length > 0
                   }
                   onChange={toggleSelectAll}
                   className="w-4 h-4 rounded border-ink-300 text-brand-600 focus:ring-brand-500/20"
@@ -661,7 +727,7 @@ function SessionsTab() {
             </tr>
           </thead>
           <tbody>
-            {mockSessions.map((s, idx) => {
+            {onlineSessions.map((s, idx) => {
               const initial = s.userName.charAt(0);
               const avatarCls = avatarColors[idx % avatarColors.length];
               const activity = formatTimeAgo(s.lastActiveAt);
@@ -754,6 +820,7 @@ function SessionsTab() {
                         <Eye className="w-3.5 h-3.5" />
                       </button>
                       <button
+                        onClick={() => handleSingleLogoutClick(s)}
                         className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium text-danger-600 hover:bg-danger-50 border border-danger-200 transition-colors"
                         title="强制下线"
                       >
@@ -765,16 +832,126 @@ function SessionsTab() {
                 </tr>
               );
             })}
+            {onlineSessions.length === 0 && (
+              <tr>
+                <td
+                  colSpan={10}
+                  className="table-td text-center text-ink-400 py-12"
+                >
+                  暂无在线会话
+                </td>
+              </tr>
+            )}
           </tbody>
         </table>
       </section>
 
       <PaginationBar
-        total={42}
+        total={onlineSessions.length}
         currentPage={currentPage}
-        totalPages={6}
+        totalPages={totalPages}
         onPageChange={setCurrentPage}
       />
+
+      <Modal
+        open={singleModalOpen}
+        onClose={() => setSingleModalOpen(false)}
+        title="确认强制下线此会话？"
+        icon={<AlertTriangle className="w-5 h-5 text-danger-600" />}
+        width="max-w-md"
+        footer={
+          <>
+            <button
+              className="btn-ghost"
+              onClick={() => setSingleModalOpen(false)}
+            >
+              取消
+            </button>
+            <button className="btn-danger" onClick={confirmSingleLogout}>
+              确认下线
+            </button>
+          </>
+        }
+      >
+        {targetSession && (
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-y-3 gap-x-6 text-sm">
+              <div>
+                <div className="text-xs text-ink-400 mb-0.5">用户</div>
+                <div className="text-ink-800 font-medium">{targetSession.userName}</div>
+              </div>
+              <div>
+                <div className="text-xs text-ink-400 mb-0.5">应用</div>
+                <div className="text-ink-800 font-medium">{targetSession.appName}</div>
+              </div>
+              <div>
+                <div className="text-xs text-ink-400 mb-0.5">登录 IP</div>
+                <div className="text-ink-800 font-mono text-xs">{targetSession.ip}</div>
+              </div>
+              <div>
+                <div className="text-xs text-ink-400 mb-0.5">登录地点</div>
+                <div className="text-ink-800">{targetSession.location}</div>
+              </div>
+              <div>
+                <div className="text-xs text-ink-400 mb-0.5">登录时间</div>
+                <div className="text-ink-800 font-mono text-xs">{targetSession.loginAt}</div>
+              </div>
+              <div>
+                <div className="text-xs text-ink-400 mb-0.5">最近活动</div>
+                <div className="text-ink-800 font-mono text-xs">{targetSession.lastActiveAt}</div>
+              </div>
+            </div>
+            <div className="rounded-md bg-warn-50 border border-warn-200 px-3 py-2.5 text-xs text-warn-700 flex items-start gap-2">
+              <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+              <span>提示：用户将立即被退出当前系统，需要重新登录才能继续访问。</span>
+            </div>
+          </div>
+        )}
+      </Modal>
+
+      <Modal
+        open={batchModalOpen}
+        onClose={() => setBatchModalOpen(false)}
+        title="确认批量强制下线？"
+        icon={<AlertTriangle className="w-5 h-5 text-danger-600" />}
+        width="max-w-md"
+        footer={
+          <>
+            <button
+              className="btn-ghost"
+              onClick={() => setBatchModalOpen(false)}
+            >
+              取消
+            </button>
+            <button className="btn-danger" onClick={confirmBatchLogout}>
+              确认批量下线
+            </button>
+          </>
+        }
+      >
+        <div className="space-y-4">
+          <div className="text-sm text-ink-600">
+            即将强制下线选中的 <span className="font-semibold text-danger-600">{selectedIds.length}</span> 个会话，所有相关用户将被系统登出。
+          </div>
+          <div className="rounded-md border border-ink-200 divide-y divide-ink-100 max-h-56 overflow-y-auto scrollbar-thin">
+            {selectedSessionsForPreview.slice(0, 5).map((s) => (
+              <div key={s.id} className="px-3 py-2 text-sm text-ink-700 flex items-center justify-between">
+                <span>{s.userName}</span>
+                <span className="text-xs text-ink-400">- {s.appName}</span>
+              </div>
+            ))}
+            {selectedSessionsForPreview.length > 5 && (
+              <div className="px-3 py-2 text-xs text-ink-400">
+                等 {selectedSessionsForPreview.length} 个会话
+              </div>
+            )}
+          </div>
+          <div className="rounded-md bg-warn-50 border border-warn-200 px-3 py-2.5 text-xs text-warn-700 flex items-start gap-2">
+            <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+            <span>提示：此操作不可撤销，所有选中用户将立即被系统登出。</span>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }

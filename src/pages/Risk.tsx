@@ -46,7 +46,9 @@ import {
   Tooltip,
   Legend,
 } from "recharts";
-import { mockRiskEvents, mockRiskRules, mockAuditLogs, mockUsers } from "@/mock";
+import { useAppStore } from "@/stores/useAppStore";
+import { Modal, toast } from "@/components/ui/Modal";
+import { mockRiskRules } from "@/mock";
 import type { RiskLevel, RiskType, RiskStatus, HandleAction } from "@/types";
 
 type TabKey = "overview" | "accounts" | "rules" | "records";
@@ -164,14 +166,28 @@ export default function Risk() {
 }
 
 function OverviewTab() {
+  const riskEvents = useAppStore((s) => s.riskEvents);
+
+  const pendingCount = riskEvents.filter((r) => r.status === "pending").length;
+  const resolvedCount = riskEvents.filter((r) => r.status === "resolved").length;
+
+  const levelCounts = useMemo(() => {
+    const counts = { high: 0, medium: 0, low: 0 };
+    riskEvents.forEach((r) => {
+      counts[r.level] = (counts[r.level] || 0) + 1;
+    });
+    return counts;
+  }, [riskEvents]);
+
+  const totalLevel = levelCounts.high + levelCounts.medium + levelCounts.low || 1;
   const pieData = [
-    { name: "高危", value: 25, color: "#DC2626" },
-    { name: "中危", value: 45, color: "#F59E0B" },
-    { name: "低危", value: 30, color: "#6366F1" },
+    { name: "高危", value: Math.round((levelCounts.high / totalLevel) * 100) || 0, color: "#DC2626" },
+    { name: "中危", value: Math.round((levelCounts.medium / totalLevel) * 100) || 0, color: "#F59E0B" },
+    { name: "低危", value: Math.round((levelCounts.low / totalLevel) * 100) || 0, color: "#6366F1" },
   ];
 
   const trendData = useMemo(() => generate14DayTrend(), []);
-  const recentEvents = useMemo(() => mockRiskEvents.slice(0, 6), []);
+  const recentEvents = useMemo(() => riskEvents.slice(0, 6), [riskEvents]);
 
   return (
     <div className="space-y-4">
@@ -189,10 +205,10 @@ function OverviewTab() {
                 </span>
               </div>
               <div className="mt-2 flex items-baseline gap-2">
-                <span className="text-3xl font-bold text-ink-800 font-display tabular-nums">3</span>
+                <span className="text-3xl font-bold text-ink-800 font-display tabular-nums">{pendingCount}</span>
                 <div className="flex items-center gap-0.5 text-xs text-danger-600">
                   <TrendingUp className="w-3.5 h-3.5" />
-                  <span>50%</span>
+                  <span>实时</span>
                 </div>
               </div>
             </div>
@@ -200,15 +216,15 @@ function OverviewTab() {
           <div className="mt-4 grid grid-cols-3 gap-2">
             <div className="rounded-md bg-danger-50 p-2.5 text-center">
               <div className="text-xs text-ink-500">高危</div>
-              <div className="mt-0.5 text-lg font-semibold text-danger-600 tabular-nums">2</div>
+              <div className="mt-0.5 text-lg font-semibold text-danger-600 tabular-nums">{levelCounts.high}</div>
             </div>
             <div className="rounded-md bg-warn-50 p-2.5 text-center">
               <div className="text-xs text-ink-500">中危</div>
-              <div className="mt-0.5 text-lg font-semibold text-warn-600 tabular-nums">1</div>
+              <div className="mt-0.5 text-lg font-semibold text-warn-600 tabular-nums">{levelCounts.medium}</div>
             </div>
             <div className="rounded-md bg-brand-50 p-2.5 text-center">
               <div className="text-xs text-ink-500">低危</div>
-              <div className="mt-0.5 text-lg font-semibold text-brand-600 tabular-nums">0</div>
+              <div className="mt-0.5 text-lg font-semibold text-brand-600 tabular-nums">{levelCounts.low}</div>
             </div>
           </div>
         </div>
@@ -222,11 +238,11 @@ function OverviewTab() {
                 <span className="text-sm font-medium text-ink-600">本月已处置</span>
               </div>
               <div className="mt-2 flex items-baseline gap-2">
-                <span className="text-3xl font-bold text-ink-800 font-display tabular-nums">12</span>
-                <span className="text-xs text-safe-600 font-medium">处置率 80%</span>
+                <span className="text-3xl font-bold text-ink-800 font-display tabular-nums">{resolvedCount}</span>
+                <span className="text-xs text-safe-600 font-medium">已处置</span>
                 <div className="flex items-center gap-0.5 text-xs text-safe-600 ml-auto">
                   <TrendingDown className="w-3.5 h-3.5" />
-                  <span>处置时长↓</span>
+                  <span>实时统计</span>
                 </div>
               </div>
             </div>
@@ -499,15 +515,6 @@ interface RiskAccount {
   status: AccountStatus;
 }
 
-const mockRiskAccounts: RiskAccount[] = [
-  { id: "u007", name: "吴九", dept: "信息安全部", position: "安全审计员", level: "high", reason: "异地登录", eventCount: 3, lastTime: "2026-06-08 23:45:12", status: "frozen" },
-  { id: "u006", name: "周八", dept: "后端开发组", position: "高级开发工程师", level: "high", reason: "暴力破解", eventCount: 1, lastTime: "2026-06-10 07:30:00", status: "frozen" },
-  { id: "u005", name: "孙七", dept: "前端开发组", position: "高级开发工程师", level: "medium", reason: "异常设备", eventCount: 2, lastTime: "2026-06-10 08:20:15", status: "pending" },
-  { id: "u003", name: "王五", dept: "人力资源部", position: "HRBP", level: "medium", reason: "异常时段", eventCount: 4, lastTime: "2026-06-09 02:15:44", status: "recovered" },
-  { id: "u010", name: "林二", dept: "运营管理部", position: "运营专员", level: "low", reason: "高频失败", eventCount: 2, lastTime: "2026-06-10 08:40:00", status: "recovered" },
-  { id: "u008", name: "郑十", dept: "市场营销部", position: "市场总监", level: "high", reason: "异地登录", eventCount: 1, lastTime: "2026-06-09 22:10:33", status: "pending" },
-];
-
 const accountStatusBadgeMap: Record<AccountStatus, string> = {
   frozen: "badge-danger",
   pending: "badge-warn animate-pulse-soft",
@@ -521,6 +528,14 @@ const accountStatusLabelMap: Record<AccountStatus, string> = {
 };
 
 function AccountsTab() {
+  const riskEvents = useAppStore((s) => s.riskEvents);
+  const users = useAppStore((s) => s.users);
+  const sessions = useAppStore((s) => s.sessions);
+  const batchHandleRiskEvents = useAppStore((s) => s.batchHandleRiskEvents);
+  const freezeUserFromRisk = useAppStore((s) => s.freezeUserFromRisk);
+  const updateUserStatus = useAppStore((s) => s.updateUserStatus);
+  const batchLogoutSessions = useAppStore((s) => s.batchLogoutSessions);
+
   const [statusTab, setStatusTab] = useState<"frozen" | "pending" | "recovered" | "all">("all");
   const [levelFilter, setLevelFilter] = useState<RiskLevel | "all">("all");
   const [searchText, setSearchText] = useState("");
@@ -528,8 +543,62 @@ function AccountsTab() {
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [detailAccount, setDetailAccount] = useState<RiskAccount | null>(null);
 
+  const [freezeModal, setFreezeModal] = useState<{ account: RiskAccount } | null>(null);
+  const [unfreezeModal, setUnfreezeModal] = useState<{ account: RiskAccount } | null>(null);
+  const [logoutModal, setLogoutModal] = useState<{ account: RiskAccount } | null>(null);
+  const [releaseModal, setReleaseModal] = useState<{ account: RiskAccount } | null>(null);
+  const [releaseRemark, setReleaseRemark] = useState("");
+
+  const [batchFreezeOpen, setBatchFreezeOpen] = useState(false);
+  const [batchLogoutOpen, setBatchLogoutOpen] = useState(false);
+  const [batchReleaseOpen, setBatchReleaseOpen] = useState(false);
+  const [batchReleaseRemark, setBatchReleaseRemark] = useState("");
+
+  const accounts = useMemo<RiskAccount[]>(() => {
+    const userEvents = new Map<string, typeof riskEvents>();
+    riskEvents.forEach((ev) => {
+      if (!userEvents.has(ev.userId)) userEvents.set(ev.userId, []);
+      userEvents.get(ev.userId)!.push(ev);
+    });
+
+    const list: RiskAccount[] = [];
+    userEvents.forEach((evts, uid) => {
+      const user = users.find((u) => u.id === uid);
+      if (!user) return;
+      const sorted = [...evts].sort((a, b) => b.detectedAt.localeCompare(a.detectedAt));
+      const latest = sorted[0];
+      const levelRank = { high: 3, medium: 2, low: 1 } as const;
+      const maxLevel = sorted.reduce(
+        (acc, e) => (levelRank[e.level] > levelRank[acc] ? e.level : acc),
+        "low" as RiskLevel
+      );
+      let status: AccountStatus;
+      if (user.status === "frozen") status = "frozen";
+      else if (evts.some((e) => e.status === "pending")) status = "pending";
+      else status = "recovered";
+      list.push({
+        id: uid,
+        name: user.name,
+        dept: user.departmentName,
+        position: user.positionName,
+        level: maxLevel,
+        reason: latest.type,
+        eventCount: evts.length,
+        lastTime: latest.detectedAt,
+        status,
+      });
+    });
+    return list.sort((a, b) => {
+      const rankS = { frozen: 0, pending: 1, recovered: 2 } as const;
+      if (rankS[a.status] !== rankS[b.status]) return rankS[a.status] - rankS[b.status];
+      const rankL = { high: 0, medium: 1, low: 2 } as const;
+      if (rankL[a.level] !== rankL[b.level]) return rankL[a.level] - rankL[b.level];
+      return b.lastTime.localeCompare(a.lastTime);
+    });
+  }, [riskEvents, users]);
+
   const filteredAccounts = useMemo(() => {
-    return mockRiskAccounts.filter((a) => {
+    return accounts.filter((a) => {
       if (statusTab !== "all" && a.status !== statusTab) return false;
       if (levelFilter !== "all" && a.level !== levelFilter) return false;
       if (typeFilter !== "all" && a.reason !== typeFilter) return false;
@@ -545,7 +614,7 @@ function AccountsTab() {
       }
       return true;
     });
-  }, [statusTab, levelFilter, typeFilter, searchText]);
+  }, [accounts, statusTab, levelFilter, typeFilter, searchText]);
 
   const toggleSelect = (id: string) => {
     setSelectedIds((prev) =>
@@ -561,6 +630,151 @@ function AccountsTab() {
     }
   };
 
+  const getPendingEventIds = (userId: string): string[] => {
+    return riskEvents.filter((r) => r.userId === userId && r.status === "pending").map((r) => r.id);
+  };
+
+  const handleFreeze = (account: RiskAccount) => {
+    const evIds = getPendingEventIds(account.id);
+    if (evIds.length > 0) {
+      batchHandleRiskEvents(evIds, "freeze", "风险页面批量冻结处置");
+    } else {
+      freezeUserFromRisk(account.id, "风险页面异常账号冻结");
+    }
+    toast.success("账号已冻结，用户无法登录系统");
+    setFreezeModal(null);
+  };
+
+  const handleUnfreeze = (account: RiskAccount) => {
+    updateUserStatus(account.id, "active");
+    toast.success("账号已恢复正常状态");
+    setUnfreezeModal(null);
+  };
+
+  const handleLogout = (account: RiskAccount) => {
+    const userSessionIds = sessions.filter((s) => s.userId === account.id && s.isOnline).map((s) => s.id);
+    if (userSessionIds.length > 0) {
+      batchLogoutSessions(userSessionIds);
+    }
+    const evIds = getPendingEventIds(account.id);
+    if (evIds.length > 0) {
+      batchHandleRiskEvents(evIds, "logout", "风险页面强制下线处置");
+    }
+    toast.success("用户所有在线会话已下线");
+    setLogoutModal(null);
+  };
+
+  const handleRelease = (account: RiskAccount) => {
+    if (account.level === "low") {
+      const evIds = getPendingEventIds(account.id);
+      if (evIds.length > 0) batchHandleRiskEvents(evIds, "release", releaseRemark || "低风险放行");
+      toast.success("已标记放行，已记录操作留痕");
+      setReleaseModal(null);
+      setReleaseRemark("");
+      return;
+    }
+    const evIds = getPendingEventIds(account.id);
+    if (evIds.length > 0) batchHandleRiskEvents(evIds, "release", releaseRemark || "人工核查放行");
+    toast.success("已标记放行，已记录操作留痕");
+    setReleaseModal(null);
+    setReleaseRemark("");
+  };
+
+  const handleBatchFreeze = () => {
+    if (selectedIds.length === 0) {
+      toast.warn("请先选择要操作的账号");
+      return;
+    }
+    const ids = [...selectedIds];
+    const allEventIds: string[] = [];
+    ids.forEach((uid) => allEventIds.push(...getPendingEventIds(uid)));
+    if (allEventIds.length > 0) {
+      batchHandleRiskEvents(allEventIds, "freeze", "批量冻结处置");
+    } else {
+      ids.forEach((uid) => freezeUserFromRisk(uid, "风险页面批量冻结"));
+    }
+    toast.success(`已批量冻结 ${ids.length} 个账号`);
+    setBatchFreezeOpen(false);
+    setSelectedIds([]);
+  };
+
+  const handleBatchLogout = () => {
+    if (selectedIds.length === 0) {
+      toast.warn("请先选择要操作的账号");
+      return;
+    }
+    const ids = [...selectedIds];
+    const allSessionIds: string[] = [];
+    ids.forEach((uid) => {
+      sessions
+        .filter((s) => s.userId === uid && s.isOnline)
+        .forEach((s) => allSessionIds.push(s.id));
+    });
+    if (allSessionIds.length > 0) batchLogoutSessions(allSessionIds);
+    const allEventIds: string[] = [];
+    ids.forEach((uid) => allEventIds.push(...getPendingEventIds(uid)));
+    if (allEventIds.length > 0) {
+      batchHandleRiskEvents(allEventIds, "logout", "批量强制下线处置");
+    }
+    toast.success(`已对 ${ids.length} 个账号执行强制下线`);
+    setBatchLogoutOpen(false);
+    setSelectedIds([]);
+  };
+
+  const handleBatchRelease = () => {
+    if (selectedIds.length === 0) {
+      toast.warn("请先选择要操作的账号");
+      return;
+    }
+    const ids = [...selectedIds];
+    const allEventIds: string[] = [];
+    ids.forEach((uid) => allEventIds.push(...getPendingEventIds(uid)));
+    if (allEventIds.length > 0) {
+      batchHandleRiskEvents(allEventIds, "release", batchReleaseRemark || "批量放行处置");
+    }
+    toast.success(`已批量放行 ${ids.length} 个账号`);
+    setBatchReleaseOpen(false);
+    setBatchReleaseRemark("");
+    setSelectedIds([]);
+  };
+
+  const handleExport = () => {
+    if (selectedIds.length === 0) {
+      toast.warn("请先选择要操作的账号");
+      return;
+    }
+    toast.success(`已导出 ${selectedIds.length} 条账号数据`);
+  };
+
+  const BatchActionBar = () => (
+    <section className="card-base p-3 flex items-center justify-between animate-fade-in-up bg-brand-50/50">
+      <div className="flex items-center gap-2 text-sm">
+        <CheckCircle2 className="w-4 h-4 text-brand-600" />
+        <span className="text-ink-700">
+          已选中 <span className="font-semibold text-brand-700">{selectedIds.length}</span> 项
+        </span>
+      </div>
+      <div className="flex items-center gap-2">
+        <button className="btn-danger !py-1.5 !px-3 text-xs" onClick={() => setBatchFreezeOpen(true)}>
+          <Snowflake className="w-3.5 h-3.5" />
+          <span>批量冻结</span>
+        </button>
+        <button className="btn-secondary !py-1.5 !px-3 text-xs" onClick={() => setBatchLogoutOpen(true)}>
+          <LogOut className="w-3.5 h-3.5" />
+          <span>批量强制下线</span>
+        </button>
+        <button className="btn-secondary !py-1.5 !px-3 text-xs" onClick={() => setBatchReleaseOpen(true)}>
+          <CheckCircle2 className="w-3.5 h-3.5" />
+          <span>批量放行</span>
+        </button>
+        <button className="btn-ghost !py-1.5 !px-3 text-xs" onClick={handleExport}>
+          <FileDown className="w-3.5 h-3.5" />
+          <span>导出</span>
+        </button>
+      </div>
+    </section>
+  );
+
   return (
     <div className="space-y-4">
       <section className="card-base p-4 animate-fade-in-up">
@@ -569,8 +783,8 @@ function AccountsTab() {
             {(["frozen", "pending", "recovered", "all"] as const).map((s) => {
               const count =
                 s === "all"
-                  ? mockRiskAccounts.length
-                  : mockRiskAccounts.filter((a) => a.status === s).length;
+                  ? accounts.length
+                  : accounts.filter((a) => a.status === s).length;
               const isActive = statusTab === s;
               const label =
                 s === "frozen" ? "冻结中" : s === "pending" ? "待处置" : s === "recovered" ? "已恢复" : "全部";
@@ -641,34 +855,7 @@ function AccountsTab() {
         </div>
       </section>
 
-      {selectedIds.length > 0 && (
-        <section className="card-base p-3 flex items-center justify-between animate-fade-in-up bg-brand-50/50">
-          <div className="flex items-center gap-2 text-sm">
-            <CheckCircle2 className="w-4 h-4 text-brand-600" />
-            <span className="text-ink-700">
-              已选中 <span className="font-semibold text-brand-700">{selectedIds.length}</span> 项
-            </span>
-          </div>
-          <div className="flex items-center gap-2">
-            <button className="btn-danger !py-1.5 !px-3 text-xs">
-              <Snowflake className="w-3.5 h-3.5" />
-              <span>批量冻结</span>
-            </button>
-            <button className="btn-secondary !py-1.5 !px-3 text-xs">
-              <LogOut className="w-3.5 h-3.5" />
-              <span>批量强制下线</span>
-            </button>
-            <button className="btn-secondary !py-1.5 !px-3 text-xs">
-              <CheckCircle2 className="w-3.5 h-3.5" />
-              <span>批量放行</span>
-            </button>
-            <button className="btn-ghost !py-1.5 !px-3 text-xs">
-              <FileDown className="w-3.5 h-3.5" />
-              <span>导出</span>
-            </button>
-          </div>
-        </section>
-      )}
+      {selectedIds.length > 0 && <BatchActionBar />}
 
       <section className="card-base overflow-auto scrollbar-thin animate-fade-in-up">
         <table className="min-w-full">
@@ -752,6 +939,7 @@ function AccountsTab() {
                       </button>
                       {a.status === "frozen" ? (
                         <button
+                          onClick={() => setUnfreezeModal({ account: a })}
                           className="inline-flex items-center justify-center w-8 h-8 rounded-md text-safe-600 hover:bg-safe-50 transition-colors"
                           title="解冻账号"
                         >
@@ -759,6 +947,7 @@ function AccountsTab() {
                         </button>
                       ) : (
                         <button
+                          onClick={() => setFreezeModal({ account: a })}
                           className="inline-flex items-center justify-center w-8 h-8 rounded-md text-danger-600 hover:bg-danger-50 transition-colors"
                           title="冻结账号"
                         >
@@ -766,12 +955,23 @@ function AccountsTab() {
                         </button>
                       )}
                       <button
+                        onClick={() => setLogoutModal({ account: a })}
                         className="inline-flex items-center justify-center w-8 h-8 rounded-md text-warn-600 hover:bg-warn-50 transition-colors"
                         title="强制下线"
                       >
                         <LogOut className="w-4 h-4" />
                       </button>
                       <button
+                        onClick={() => {
+                          if (a.level === "low") {
+                            const evIds = getPendingEventIds(a.id);
+                            if (evIds.length > 0) batchHandleRiskEvents(evIds, "release", "低风险快速放行");
+                            toast.success("已标记放行，已记录操作留痕");
+                          } else {
+                            setReleaseModal({ account: a });
+                            setReleaseRemark("");
+                          }
+                        }}
                         className="inline-flex items-center justify-center w-8 h-8 rounded-md text-safe-600 hover:bg-safe-50 transition-colors"
                         title="标记放行"
                       >
@@ -793,44 +993,236 @@ function AccountsTab() {
         </table>
       </section>
 
-      {selectedIds.length > 0 && (
-        <section className="card-base p-3 flex items-center justify-between animate-fade-in-up bg-brand-50/50">
-          <div className="flex items-center gap-2 text-sm">
-            <CheckCircle2 className="w-4 h-4 text-brand-600" />
-            <span className="text-ink-700">
-              已选中 <span className="font-semibold text-brand-700">{selectedIds.length}</span> 项
-            </span>
-          </div>
-          <div className="flex items-center gap-2">
-            <button className="btn-danger !py-1.5 !px-3 text-xs">
-              <Snowflake className="w-3.5 h-3.5" />
-              <span>批量冻结</span>
-            </button>
-            <button className="btn-secondary !py-1.5 !px-3 text-xs">
-              <LogOut className="w-3.5 h-3.5" />
-              <span>批量强制下线</span>
-            </button>
-            <button className="btn-secondary !py-1.5 !px-3 text-xs">
-              <CheckCircle2 className="w-3.5 h-3.5" />
-              <span>批量放行</span>
-            </button>
-            <button className="btn-ghost !py-1.5 !px-3 text-xs">
-              <FileDown className="w-3.5 h-3.5" />
-              <span>导出</span>
-            </button>
-          </div>
-        </section>
-      )}
+      {selectedIds.length > 0 && <BatchActionBar />}
 
       {detailAccount && (
         <AccountDetailDrawer account={detailAccount} onClose={() => setDetailAccount(null)} />
       )}
+
+      <Modal
+        open={!!freezeModal}
+        onClose={() => setFreezeModal(null)}
+        title="确认冻结异常账号？"
+        icon={<Ban className="w-5 h-5 text-danger-600" />}
+        footer={
+          <>
+            <button className="btn-secondary" onClick={() => setFreezeModal(null)}>取消</button>
+            <button className="btn-danger" onClick={() => freezeModal && handleFreeze(freezeModal.account)}>
+              确认冻结
+            </button>
+          </>
+        }
+      >
+        {freezeModal && (
+          <div className="space-y-3 text-sm">
+            <div className="p-3 rounded-md bg-ink-50/60 border border-ink-200">
+              <div className="flex items-center gap-2">
+                <User className="w-4 h-4 text-ink-500" />
+                <span className="font-medium text-ink-800">{freezeModal.account.name}</span>
+                <span className="text-ink-500">/</span>
+                <span className="text-ink-600">{freezeModal.account.dept}</span>
+                <span className="text-ink-500">/</span>
+                <span className="text-ink-600">{freezeModal.account.position}</span>
+              </div>
+            </div>
+            <div>
+              <div className="text-xs font-medium text-ink-600 mb-1">风险原因：</div>
+              <div className="p-2.5 rounded-md bg-danger-50 border border-danger-200/60 text-danger-700">
+                {(() => {
+                  const ev = riskEvents.find((e) => e.userId === freezeModal!.account.id);
+                  return ev?.description || `${freezeModal.account.reason} - 检测到异常行为模式`;
+                })()}
+              </div>
+            </div>
+            <div className="flex items-start gap-2 p-3 rounded-md bg-warn-50 border border-warn-200/60 text-warn-700">
+              <AlertTriangle className="w-4 h-4 mt-0.5 flex-shrink-0" />
+              <span>冻结后用户无法登录任何系统，需人工审核后才能解冻。</span>
+            </div>
+          </div>
+        )}
+      </Modal>
+
+      <Modal
+        open={!!unfreezeModal}
+        onClose={() => setUnfreezeModal(null)}
+        title="确认解冻该账号？"
+        icon={<UserCheck className="w-5 h-5 text-safe-600" />}
+        footer={
+          <>
+            <button className="btn-secondary" onClick={() => setUnfreezeModal(null)}>取消</button>
+            <button className="btn-primary" onClick={() => unfreezeModal && handleUnfreeze(unfreezeModal.account)}>
+              确认解冻
+            </button>
+          </>
+        }
+      >
+        {unfreezeModal && (
+          <div className="space-y-3 text-sm">
+            <div className="p-3 rounded-md bg-ink-50/60 border border-ink-200">
+              <div className="flex items-center gap-2">
+                <User className="w-4 h-4 text-ink-500" />
+                <span className="font-medium text-ink-800">{unfreezeModal.account.name}</span>
+                <span className="text-ink-500">/</span>
+                <span className="text-ink-600">{unfreezeModal.account.dept}</span>
+              </div>
+            </div>
+            <p className="text-ink-600">解冻后账号将恢复正常状态，用户可重新登录系统。</p>
+          </div>
+        )}
+      </Modal>
+
+      <Modal
+        open={!!logoutModal}
+        onClose={() => setLogoutModal(null)}
+        title="强制下线该用户所有会话？"
+        icon={<LogOut className="w-5 h-5 text-warn-600" />}
+        footer={
+          <>
+            <button className="btn-secondary" onClick={() => setLogoutModal(null)}>取消</button>
+            <button className="btn-primary" onClick={() => logoutModal && handleLogout(logoutModal.account)}>
+              确认下线
+            </button>
+          </>
+        }
+      >
+        {logoutModal && (
+          <div className="space-y-3 text-sm">
+            <p className="text-ink-700">
+              将下线用户 <span className="font-semibold text-ink-800">{logoutModal.account.name}</span> 的所有系统会话。
+            </p>
+            <p className="text-ink-500">用户当前所有登录状态将被立即清除，需重新登录才能继续使用。</p>
+          </div>
+        )}
+      </Modal>
+
+      <Modal
+        open={!!releaseModal}
+        onClose={() => { setReleaseModal(null); setReleaseRemark(""); }}
+        title="确认放行该异常？"
+        icon={<CheckCircle2 className="w-5 h-5 text-safe-600" />}
+        footer={
+          <>
+            <button className="btn-secondary" onClick={() => { setReleaseModal(null); setReleaseRemark(""); }}>取消</button>
+            <button className="btn-primary" onClick={() => releaseModal && handleRelease(releaseModal.account)}>
+              确认放行
+            </button>
+          </>
+        }
+      >
+        {releaseModal && (
+          <div className="space-y-3">
+            <div className="p-3 rounded-md bg-ink-50/60 border border-ink-200 text-sm">
+              <span className="font-medium text-ink-800">{releaseModal.account.name}</span>
+              <span className="text-ink-500 mx-1">/</span>
+              <span className="text-ink-600">{releaseModal.account.dept}</span>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-ink-700 mb-1.5">放行原因（必填）</label>
+              <textarea
+                className="input-base min-h-[80px] resize-y text-sm"
+                placeholder="请填写人工核查结果或放行说明..."
+                value={releaseRemark}
+                onChange={(e) => setReleaseRemark(e.target.value)}
+              />
+            </div>
+          </div>
+        )}
+      </Modal>
+
+      <Modal
+        open={batchFreezeOpen}
+        onClose={() => setBatchFreezeOpen(false)}
+        title={`确认批量冻结 ${selectedIds.length} 个账号？`}
+        icon={<Snowflake className="w-5 h-5 text-danger-600" />}
+        footer={
+          <>
+            <button className="btn-secondary" onClick={() => setBatchFreezeOpen(false)}>取消</button>
+            <button className="btn-danger" onClick={handleBatchFreeze}>确认批量冻结</button>
+          </>
+        }
+      >
+        <div className="space-y-3 text-sm">
+          <p className="text-ink-700">
+            将对已选中的 <span className="font-semibold text-danger-600">{selectedIds.length}</span> 个账号执行冻结操作。
+          </p>
+          <div className="flex items-start gap-2 p-3 rounded-md bg-warn-50 border border-warn-200/60 text-warn-700">
+            <AlertTriangle className="w-4 h-4 mt-0.5 flex-shrink-0" />
+            <span>冻结后所有选中用户均无法登录任何系统，需人工审核后才能解冻。</span>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal
+        open={batchLogoutOpen}
+        onClose={() => setBatchLogoutOpen(false)}
+        title={`确认对 ${selectedIds.length} 个账号执行强制下线？`}
+        icon={<LogOut className="w-5 h-5 text-warn-600" />}
+        footer={
+          <>
+            <button className="btn-secondary" onClick={() => setBatchLogoutOpen(false)}>取消</button>
+            <button className="btn-primary" onClick={handleBatchLogout}>确认批量下线</button>
+          </>
+        }
+      >
+        <div className="space-y-3 text-sm">
+          <p className="text-ink-700">
+            将下线 <span className="font-semibold text-ink-800">{selectedIds.length}</span> 个账号的所有系统会话。
+          </p>
+          <p className="text-ink-500">用户当前所有登录状态将被立即清除，需重新登录才能继续使用。</p>
+        </div>
+      </Modal>
+
+      <Modal
+        open={batchReleaseOpen}
+        onClose={() => { setBatchReleaseOpen(false); setBatchReleaseRemark(""); }}
+        title={`确认批量放行 ${selectedIds.length} 个账号？`}
+        icon={<CheckCircle2 className="w-5 h-5 text-safe-600" />}
+        footer={
+          <>
+            <button className="btn-secondary" onClick={() => { setBatchReleaseOpen(false); setBatchReleaseRemark(""); }}>取消</button>
+            <button className="btn-primary" onClick={handleBatchRelease}>确认批量放行</button>
+          </>
+        }
+      >
+        <div className="space-y-3">
+          <p className="text-sm text-ink-700">
+            将对已选中的 <span className="font-semibold text-ink-800">{selectedIds.length}</span> 个账号执行批量放行。
+          </p>
+          <div>
+            <label className="block text-xs font-medium text-ink-700 mb-1.5">放行原因（必填）</label>
+            <textarea
+              className="input-base min-h-[80px] resize-y text-sm"
+              placeholder="请填写批量放行的统一说明..."
+              value={batchReleaseRemark}
+              onChange={(e) => setBatchReleaseRemark(e.target.value)}
+            />
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }
 
 function AccountDetailDrawer({ account, onClose }: { account: RiskAccount; onClose: () => void }) {
+  const users = useAppStore((s) => s.users);
+  const riskEvents = useAppStore((s) => s.riskEvents);
+  const auditLogs = useAppStore((s) => s.auditLogs);
   const [detailTab, setDetailTab] = useState<"basic" | "login" | "risk" | "history">("basic");
+
+  const latestUser = users.find((u) => u.id === account.id);
+  const currentStatus: AccountStatus = latestUser?.status === "frozen" ? "frozen" : account.status;
+
+  const userRiskEvents = useMemo(
+    () => riskEvents.filter((e) => e.userId === account.id),
+    [riskEvents, account.id]
+  );
+
+  const userHistory = useMemo(() => {
+    return auditLogs
+      .filter((l) => l.module === "风险处置" && (l.targetId === account.id || l.targetName.includes(account.name)))
+      .slice()
+      .reverse();
+  }, [auditLogs, account.id, account.name]);
 
   return (
     <div className="fixed inset-0 z-50 overflow-hidden">
@@ -889,18 +1281,17 @@ function AccountDetailDrawer({ account, onClose }: { account: RiskAccount; onClo
                 <DetailItem label="部门" value={account.dept} />
                 <DetailItem label="岗位" value={account.position} />
                 <DetailItem label="风险等级" value={levelLabelMap[account.level]} badgeClass={levelBadgeMap[account.level]} />
-                <DetailItem label="当前状态" value={accountStatusLabelMap[account.status]} badgeClass={accountStatusBadgeMap[account.status]} />
-                <DetailItem label="MFA绑定" value="已绑定" badgeClass="badge-safe" />
-                <DetailItem label="上次登录IP" value="10.0.1.45" mono />
+                <DetailItem label="当前状态" value={accountStatusLabelMap[currentStatus]} badgeClass={accountStatusBadgeMap[currentStatus]} />
+                <DetailItem label="MFA绑定" value={latestUser?.mfaEnabled ? "已绑定" : "未绑定"} badgeClass={latestUser?.mfaEnabled ? "badge-safe" : "badge-warn"} />
+                <DetailItem label="上次登录IP" value={userRiskEvents[0]?.ip || "-"} mono />
               </div>
               <div className="pt-4 border-t border-ink-100">
                 <h4 className="text-sm font-semibold text-ink-800 mb-3">账号画像标签</h4>
                 <div className="flex flex-wrap gap-1.5">
-                  <span className="badge-info">技术岗</span>
-                  <span className="badge-info">高级权限</span>
+                  <span className="badge-info">{account.position.includes("高级") || account.position.includes("总监") ? "高级权限" : "普通权限"}</span>
                   <span className="badge-warn">近期异常</span>
-                  <span className="badge-safe">MFA已启用</span>
-                  <span className="badge-neutral">常用设备: MacBook</span>
+                  {latestUser?.mfaEnabled && <span className="badge-safe">MFA已启用</span>}
+                  <span className="badge-neutral">部门: {account.dept}</span>
                 </div>
               </div>
             </div>
@@ -916,29 +1307,27 @@ function AccountDetailDrawer({ account, onClose }: { account: RiskAccount; onClo
                 </div>
               </div>
               <div className="space-y-2">
-                <h4 className="text-sm font-semibold text-ink-800">最近登录记录</h4>
-                {[
-                  { time: "2026-06-08 23:45", ip: "203.0.113.45", loc: "上海（异常）", status: "fail", device: "Mac/Safari" },
-                  { time: "2026-06-08 09:12", ip: "10.0.1.45", loc: "北京总部", status: "success", device: "Mac/Firefox" },
-                  { time: "2026-06-07 18:30", ip: "10.0.1.45", loc: "北京总部", status: "success", device: "Mac/Firefox" },
-                ].map((log, i) => (
-                  <div key={i} className="flex items-center gap-3 p-3 rounded-md bg-ink-50/60">
-                    <span className={`w-2 h-2 rounded-full ${log.status === "success" ? "bg-safe-500" : "bg-danger-500"}`} />
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 text-sm">
-                        <span className="font-mono text-xs text-ink-500">{log.time}</span>
-                        <span className={log.status === "success" ? "badge-safe" : "badge-danger"}>
-                          {log.status === "success" ? "成功" : "失败"}
-                        </span>
-                      </div>
-                      <div className="mt-0.5 text-xs text-ink-600 flex gap-3 flex-wrap">
-                        <span className="font-mono">IP {log.ip}</span>
-                        <span>{log.loc}</span>
-                        <span>{log.device}</span>
+                <h4 className="text-sm font-semibold text-ink-800">最近登录记录（基于风险事件）</h4>
+                {userRiskEvents.length === 0 ? (
+                  <p className="text-sm text-ink-400 py-6 text-center">暂无登录记录</p>
+                ) : (
+                  userRiskEvents.slice(0, 5).map((ev, i) => (
+                    <div key={ev.id} className="flex items-center gap-3 p-3 rounded-md bg-ink-50/60">
+                      <span className="w-2 h-2 rounded-full bg-danger-500" />
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 text-sm">
+                          <span className="font-mono text-xs text-ink-500">{ev.detectedAt.slice(5, 16)}</span>
+                          <span className="badge-danger">异常</span>
+                          <span className={levelBadgeMap[ev.level]}>{levelLabelMap[ev.level]}</span>
+                        </div>
+                        <div className="mt-0.5 text-xs text-ink-600 flex gap-3 flex-wrap">
+                          <span className="font-mono">IP {ev.ip}</span>
+                          <span>{ev.type}</span>
+                        </div>
                       </div>
                     </div>
-                  </div>
-                ))}
+                  ))
+                )}
               </div>
             </div>
           )}
@@ -951,11 +1340,17 @@ function AccountDetailDrawer({ account, onClose }: { account: RiskAccount; onClo
                   <div className="text-xs text-ink-500 mt-1">风险事件</div>
                 </div>
                 <div className="card-base p-3 text-center">
-                  <div className="text-2xl font-bold text-warn-600 tabular-nums font-display">78</div>
+                  <div className="text-2xl font-bold text-warn-600 tabular-nums font-display">
+                    {account.level === "high" ? 90 : account.level === "medium" ? 70 : 45}
+                  </div>
                   <div className="text-xs text-ink-500 mt-1">风险评分</div>
                 </div>
                 <div className="card-base p-3 text-center">
-                  <div className="text-2xl font-bold text-brand-600 tabular-nums font-display">高</div>
+                  <div className={`text-2xl font-bold tabular-nums font-display ${
+                    account.level === "high" ? "text-danger-600" : account.level === "medium" ? "text-warn-600" : "text-brand-600"
+                  }`}>
+                    {account.level === "high" ? "高" : account.level === "medium" ? "中" : "低"}
+                  </div>
                   <div className="text-xs text-ink-500 mt-1">处置优先级</div>
                 </div>
               </div>
@@ -970,7 +1365,7 @@ function AccountDetailDrawer({ account, onClose }: { account: RiskAccount; onClo
                     <div>
                       <div className="text-sm font-medium text-danger-700">{account.reason}</div>
                       <div className="text-xs text-danger-600/80 mt-0.5">
-                        {mockRiskEvents.find((e) => e.userId === account.id)?.description || "检测到异常行为模式"}
+                        {userRiskEvents[0]?.description || "检测到异常行为模式"}
                       </div>
                     </div>
                   </div>
@@ -999,23 +1394,25 @@ function AccountDetailDrawer({ account, onClose }: { account: RiskAccount; onClo
           {detailTab === "history" && (
             <div className="space-y-3 animate-fade-in-up">
               <h4 className="text-sm font-semibold text-ink-800">历史处置记录</h4>
-              <ol className="relative border-l border-ink-200 ml-2 space-y-4">
-                {[
-                  { time: "2026-06-08 23:50", action: "自动冻结", operator: "系统", remark: "异地登录触发规则自动冻结" },
-                  { time: "2026-06-05 14:20", action: "人工核查", operator: "李四", remark: "确认为用户本人操作，解除告警" },
-                  { time: "2026-05-28 09:10", action: "强制下线", operator: "李四", remark: "异常时段登录，强制下线会话" },
-                ].map((h, i) => (
-                  <li key={i} className="ml-5">
-                    <span className="absolute -left-[15px] w-3 h-3 rounded-full bg-brand-500 ring-4 ring-white" />
-                    <div className="flex items-center gap-2 text-xs">
-                      <span className="font-mono text-ink-400">{h.time}</span>
-                      <span className="badge-info">{h.action}</span>
-                      <span className="text-ink-600">处置人：{h.operator}</span>
-                    </div>
-                    <p className="mt-1 text-sm text-ink-700">{h.remark}</p>
-                  </li>
-                ))}
-              </ol>
+              {userHistory.length === 0 ? (
+                <p className="text-sm text-ink-400 py-6 text-center">暂无处置历史记录</p>
+              ) : (
+                <ol className="relative border-l border-ink-200 ml-2 space-y-4">
+                  {userHistory.map((h, i) => (
+                    <li key={h.id} className="ml-5">
+                      <span className="absolute -left-[15px] w-3 h-3 rounded-full bg-brand-500 ring-4 ring-white" />
+                      <div className="flex items-center gap-2 text-xs flex-wrap">
+                        <span className="font-mono text-ink-400">{h.operateAt.slice(5, 16)}</span>
+                        <span className="badge-info">{h.action}</span>
+                        <span className="text-ink-600">处置人：{h.operatorName}</span>
+                      </div>
+                      <p className="mt-1 text-sm text-ink-700">
+                        {h.afterValue || h.beforeValue || "无详细备注"}
+                      </p>
+                    </li>
+                  ))}
+                </ol>
+              )}
             </div>
           )}
         </div>
@@ -1478,89 +1875,11 @@ const disposeTypeLabelMap: Record<DisposeType, string> = {
   reject: "驳回申请",
 };
 
-interface DisposeRecord {
-  id: string;
-  time: string;
-  operatorName: string;
-  operatorAvatar?: string;
-  type: DisposeType;
-  targetName: string;
-  targetDept: string;
-  eventId: string;
-  remark: string;
-  ip: string;
-}
-
-const mockDisposeRecords: DisposeRecord[] = [
-  {
-    id: "dr001",
-    time: "2026-06-10 07:45:30",
-    operatorName: "李四",
-    type: "freeze",
-    targetName: "周八",
-    targetDept: "后端开发组",
-    eventId: "re002",
-    remark: "检测到暴力破解攻击，已冻结账号并通过邮件通知用户本人重置密码",
-    ip: "10.0.1.45",
-  },
-  {
-    id: "dr002",
-    time: "2026-06-10 09:05:00",
-    operatorName: "李四",
-    type: "release",
-    targetName: "林二",
-    targetDept: "运营管理部",
-    eventId: "re005",
-    remark: "用户本人确认是密码记忆混淆导致的多次失败，放行处理",
-    ip: "10.0.1.45",
-  },
-  {
-    id: "dr003",
-    time: "2026-06-09 22:30:00",
-    operatorName: "张三",
-    type: "logout",
-    targetName: "郑十",
-    targetDept: "市场营销部",
-    eventId: "re006",
-    remark: "广州地区异常登录，强制下线所有活跃会话并联系用户核实，用户确认本人未出差",
-    ip: "10.0.1.23",
-  },
-  {
-    id: "dr004",
-    time: "2026-06-09 09:00:00",
-    operatorName: "李四",
-    type: "release",
-    targetName: "王五",
-    targetDept: "人力资源部",
-    eventId: "re003",
-    remark: "用户加班处理紧急招聘事项，确认为本人操作，予以放行",
-    ip: "10.0.1.45",
-  },
-  {
-    id: "dr005",
-    time: "2026-06-08 23:50:12",
-    operatorName: "系统",
-    type: "freeze",
-    targetName: "吴九",
-    targetDept: "信息安全部",
-    eventId: "re001",
-    remark: "异地登录规则自动触发：上海IP登录+MFA校验失败，系统自动冻结账号",
-    ip: "-",
-  },
-  {
-    id: "dr006",
-    time: "2026-06-07 14:20:00",
-    operatorName: "李四",
-    type: "reject",
-    targetName: "吴九",
-    targetDept: "信息安全部",
-    eventId: "re000",
-    remark: "风险告警经核查为误报，用户使用VPN连接导致IP归属地判断异常，驳回该告警",
-    ip: "10.0.1.45",
-  },
-];
-
 function RecordsTab() {
+  const auditLogs = useAppStore((s) => s.auditLogs);
+  const riskEvents = useAppStore((s) => s.riskEvents);
+  const users = useAppStore((s) => s.users);
+
   const [timeRange, setTimeRange] = useState("14d");
   const [operatorFilter, setOperatorFilter] = useState("");
   const [typeFilter, setTypeFilter] = useState<DisposeType | "all">("all");
@@ -1568,24 +1887,39 @@ function RecordsTab() {
   const [searchText, setSearchText] = useState("");
   const [tooltipId, setTooltipId] = useState<string | null>(null);
 
+  const disposalLogs = useMemo(
+    () => auditLogs.filter((l) => l.module === "风险处置").reverse(),
+    [auditLogs]
+  );
+
+  const parseDisposeType = (action: string): DisposeType => {
+    if (action.includes("冻结")) return "freeze";
+    if (action.includes("下线")) return "logout";
+    if (action.includes("放行")) return "release";
+    if (action.includes("驳回")) return "reject";
+    return "release";
+  };
+
   const filteredRecords = useMemo(() => {
-    return mockDisposeRecords.filter((r) => {
-      if (typeFilter !== "all" && r.type !== typeFilter) return false;
-      if (operatorFilter && !r.operatorName.includes(operatorFilter)) return false;
+    return disposalLogs.filter((l) => {
+      const dtype = parseDisposeType(l.action);
+      if (typeFilter !== "all" && dtype !== typeFilter) return false;
+      if (operatorFilter && !l.operatorName.includes(operatorFilter)) return false;
       if (searchText) {
         const kw = searchText.toLowerCase();
+        const remark = l.afterValue || l.beforeValue || "";
         if (
-          !r.targetName.toLowerCase().includes(kw) &&
-          !r.targetDept.toLowerCase().includes(kw) &&
-          !r.remark.toLowerCase().includes(kw) &&
-          !r.eventId.toLowerCase().includes(kw)
+          !l.targetName.toLowerCase().includes(kw) &&
+          !remark.toLowerCase().includes(kw) &&
+          !l.targetId.toLowerCase().includes(kw) &&
+          !l.operatorName.toLowerCase().includes(kw)
         ) {
           return false;
         }
       }
       return true;
     });
-  }, [typeFilter, operatorFilter, searchText]);
+  }, [disposalLogs, typeFilter, operatorFilter, searchText]);
 
   return (
     <div className="space-y-4">
@@ -1698,13 +2032,18 @@ function RecordsTab() {
             {filteredRecords.map((r, idx) => {
               const initial = r.operatorName.charAt(0);
               const avatarCls = avatarColors[idx % avatarColors.length];
-              const event = mockRiskEvents.find((e) => e.id === r.eventId);
+              const dtype = parseDisposeType(r.action);
+              const remark = r.afterValue || r.beforeValue || "-";
+              const ev = riskEvents.find((e) => e.id === r.targetId);
+              const u = users.find((x) => x.name === r.targetName.split(" / ")[0]);
+              const targetDept = u?.departmentName || (r.targetName.includes(" / ") ? r.targetName.split(" / ")[1] || "" : "");
+              const dispTargetName = r.targetName.split(" / ")[0];
               return (
                 <tr key={r.id} className="table-row">
                   <td className="table-td">
                     <div className="font-mono text-xs text-ink-600 whitespace-nowrap leading-relaxed">
-                      <div>{r.time.slice(0, 10)}</div>
-                      <div className="text-ink-400">{r.time.slice(11, 19)}</div>
+                      <div>{r.operateAt.slice(0, 10)}</div>
+                      <div className="text-ink-400">{r.operateAt.slice(11, 19)}</div>
                     </div>
                   </td>
                   <td className="table-td">
@@ -1716,23 +2055,23 @@ function RecordsTab() {
                     </div>
                   </td>
                   <td className="table-td">
-                    <span className={disposeTypeBadgeMap[r.type]}>
-                      {disposeTypeLabelMap[r.type]}
+                    <span className={disposeTypeBadgeMap[dtype]}>
+                      {disposeTypeLabelMap[dtype]}
                     </span>
                   </td>
                   <td className="table-td">
-                    <div className="text-sm text-ink-800 font-medium">{r.targetName}</div>
-                    <div className="text-xs text-ink-500">{r.targetDept}</div>
+                    <div className="text-sm text-ink-800 font-medium">{dispTargetName}</div>
+                    <div className="text-xs text-ink-500">{targetDept}</div>
                   </td>
                   <td className="table-td">
                     <button className="inline-flex items-center gap-1 text-sm text-brand-600 hover:text-brand-700 hover:underline font-mono">
                       <ShieldAlert className="w-3.5 h-3.5" />
-                      <span>{r.eventId.toUpperCase()}</span>
+                      <span>{(r.targetId || "-").toUpperCase().slice(0, 8)}</span>
                     </button>
-                    {event && (
+                    {ev && (
                       <div className="mt-0.5">
-                        <span className={levelBadgeMap[event.level]}>
-                          {levelLabelMap[event.level]}
+                        <span className={levelBadgeMap[ev.level]}>
+                          {levelLabelMap[ev.level]}
                         </span>
                       </div>
                     )}
@@ -1744,18 +2083,18 @@ function RecordsTab() {
                         onMouseEnter={() => setTooltipId(r.id)}
                         onMouseLeave={() => setTooltipId(null)}
                       >
-                        {r.remark}
+                        {remark}
                       </div>
                       {tooltipId === r.id && (
                         <div className="absolute z-20 left-0 bottom-full mb-2 w-72 p-3 rounded-md bg-ink-900 text-white text-xs shadow-xl animate-fade-in-up">
-                          {r.remark}
+                          {remark}
                           <div className="absolute left-4 -bottom-1 w-2 h-2 bg-ink-900 rotate-45" />
                         </div>
                       )}
                     </div>
                   </td>
                   <td className="table-td">
-                    <span className="font-mono text-xs text-ink-600">{r.ip}</span>
+                    <span className="font-mono text-xs text-ink-600">{r.ip || "-"}</span>
                   </td>
                 </tr>
               );

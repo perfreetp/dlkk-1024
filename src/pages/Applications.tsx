@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, useEffect } from "react";
 import {
   BookOpen,
   SquarePlus,
@@ -20,6 +20,9 @@ import {
   KeyRound,
   ShieldCheck,
   Activity,
+  ChevronRight,
+  ChevronUp,
+  AlertTriangle,
 } from "lucide-react";
 import {
   ResponsiveContainer,
@@ -32,9 +35,11 @@ import {
   Cell,
   LabelList,
 } from "recharts";
-import { mockApplications, mockAppUsageStats } from "@/mock";
-import type { Application, AppProtocol, AppStatus } from "@/types";
+import { mockAppUsageStats } from "@/mock";
+import type { Application, AppProtocol, AppStatus, AuditLog } from "@/types";
 import { cn } from "@/lib/utils";
+import { useAppStore } from "@/stores/useAppStore";
+import { Drawer, Modal, toast } from "@/components/ui/Modal";
 
 const CATEGORIES = [
   "全部",
@@ -48,6 +53,16 @@ const CATEGORIES = [
 const STATUS_FILTERS = ["全部", "已启用", "已停用"] as const;
 
 const TIME_RANGES = ["本月", "上月", "本季度"] as const;
+
+const PROTOCOLS = ["OIDC", "SAML", "CAS", "OAuth2"] as const;
+
+const SESSION_DURATION_OPTIONS = [
+  { value: "30m", label: "30分钟", minutes: 30 },
+  { value: "2h", label: "2小时", minutes: 120 },
+  { value: "8h", label: "8小时", minutes: 480 },
+  { value: "24h", label: "24小时", minutes: 1440 },
+  { value: "forever", label: "永久", minutes: 0 },
+];
 
 const categoryGradientMap: Record<string, string> = {
   办公协作: "from-brand-500 to-brand-700",
@@ -86,19 +101,99 @@ const DRAWER_TABS = [
 
 type DrawerTabKey = (typeof DRAWER_TABS)[number]["key"];
 
+interface AppFormState {
+  name: string;
+  code: string;
+  description: string;
+  category: (typeof CATEGORIES)[number];
+  status: AppStatus;
+  protocol: AppProtocol;
+  clientId: string;
+  clientSecret: string;
+  callbackUrlsText: string;
+  logoutUrlsText: string;
+  ipWhitelistText: string;
+  mfaRequired: boolean;
+  accessHoursStart: string;
+  accessHoursEnd: string;
+  sessionDuration: string;
+}
+
+const genRandomClientId = () =>
+  `client-${Math.random().toString(36).slice(2, 8)}-${Date.now().toString(36).slice(-4)}`;
+
+const genRandomSecret = () =>
+  `sk-live-${Math.random().toString(36).slice(2, 10)}${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
+
+function initFormFromApp(app: Application | undefined): AppFormState {
+  return {
+    name: app?.name || "",
+    code: app?.code || "",
+    description: app?.description || "",
+    category: (app?.category as (typeof CATEGORIES)[number]) || "办公协作",
+    status: app?.status || "enabled",
+    protocol: app?.protocol || "OIDC",
+    clientId: app?.clientId || genRandomClientId(),
+    clientSecret: app?.clientSecret || genRandomSecret(),
+    callbackUrlsText: app?.callbackUrls?.join("\n") || "",
+    logoutUrlsText: app?.logoutUrls?.join("\n") || "",
+    ipWhitelistText: app?.ipWhitelist?.join("\n") || "",
+    mfaRequired: app?.mfaRequired || false,
+    accessHoursStart: app?.accessHours?.start || "",
+    accessHoursEnd: app?.accessHours?.end || "",
+    sessionDuration: "8h",
+  };
+}
+
 export default function Applications() {
+  const applications = useAppStore((s) => s.applications);
+  const updateApplication = useAppStore((s) => s.updateApplication);
+  const toggleAppStatus = useAppStore((s) => s.toggleAppStatus);
+  const addAuditLog = useAppStore((s) => s.addAuditLog);
+  const auditLogs = useAppStore((s) => s.auditLogs);
+
   const [searchQuery, setSearchQuery] = useState("");
   const [categoryFilter, setCategoryFilter] = useState<(typeof CATEGORIES)[number]>("全部");
   const [statusFilter, setStatusFilter] = useState<(typeof STATUS_FILTERS)[number]>("全部");
   const [view, setView] = useState<"grid" | "list">("grid");
   const [timeRange, setTimeRange] = useState<(typeof TIME_RANGES)[number]>("本月");
-  const [apps, setApps] = useState<Application[]>(mockApplications);
+
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const [selectedApp, setSelectedApp] = useState<Application | null>(null);
+  const [editingAppId, setEditingAppId] = useState<string | null>(null);
   const [drawerTab, setDrawerTab] = useState<DrawerTabKey>("basic");
+  const [patchForm, setPatchForm] = useState<AppFormState>(initFormFromApp(undefined));
+  const [showAuditLogs, setShowAuditLogs] = useState(false);
+
+  const [confirmDisableOpen, setConfirmDisableOpen] = useState(false);
+  const [pendingToggleId, setPendingToggleId] = useState<string | null>(null);
+
+  const [newAppOpen, setNewAppOpen] = useState(false);
+  const [newAppForm, setNewAppForm] = useState({
+    name: "",
+    code: "",
+    description: "",
+    category: "办公协作" as (typeof CATEGORIES)[number],
+    protocol: "OIDC" as AppProtocol,
+  });
+
+  const currentApp = useMemo(
+    () => applications.find((a) => a.id === editingAppId),
+    [applications, editingAppId]
+  );
+
+  const appAuditLogs = useMemo(() => {
+    if (!editingAppId) return [];
+    return auditLogs.filter((l) => l.targetId === editingAppId).slice(0, 5);
+  }, [auditLogs, editingAppId]);
+
+  useEffect(() => {
+    if (drawerOpen && currentApp) {
+      setPatchForm(initFormFromApp(currentApp));
+    }
+  }, [drawerOpen, currentApp?.id]);
 
   const filteredApps = useMemo(() => {
-    return apps.filter((app) => {
+    return applications.filter((app) => {
       const matchSearch =
         !searchQuery ||
         app.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -111,7 +206,7 @@ export default function Applications() {
         (statusFilter === "已停用" && app.status === "disabled");
       return matchSearch && matchCategory && matchStatus;
     });
-  }, [apps, searchQuery, categoryFilter, statusFilter]);
+  }, [applications, searchQuery, categoryFilter, statusFilter]);
 
   const appLoginStats = useMemo(() => {
     const map = new Map<string, { loginCount: number; uniqueUsers: number }>();
@@ -123,7 +218,7 @@ export default function Applications() {
 
   const usageChartData = useMemo(() => {
     return mockAppUsageStats.map((s) => {
-      const app = apps.find((a) => a.id === s.appId);
+      const app = applications.find((a) => a.id === s.appId);
       const failRate =
         s.loginCount > 0
           ? ((s.failCount / s.loginCount) * 100).toFixed(1) + "%"
@@ -135,27 +230,128 @@ export default function Applications() {
         label: `${s.loginCount.toLocaleString()} (${failRate})`,
       };
     });
-  }, [apps]);
+  }, [applications]);
 
   const handleToggleStatus = (id: string) => {
-    setApps((prev) =>
-      prev.map((app) =>
-        app.id === id
-          ? { ...app, status: app.status === "enabled" ? "disabled" : "enabled" }
-          : app
-      )
-    );
+    const app = applications.find((a) => a.id === id);
+    if (!app) return;
+    if (app.status === "enabled") {
+      setPendingToggleId(id);
+      setConfirmDisableOpen(true);
+    } else {
+      toggleAppStatus(id);
+      toast.success("应用已启用");
+    }
   };
 
-  const handleOpenDrawer = (app: Application) => {
-    setSelectedApp(app);
+  const confirmDisable = () => {
+    if (pendingToggleId) {
+      toggleAppStatus(pendingToggleId);
+      toast.success("应用已停用");
+    }
+    setConfirmDisableOpen(false);
+    setPendingToggleId(null);
+  };
+
+  const handleOpenDrawer = (appId: string) => {
+    setEditingAppId(appId);
     setDrawerTab("basic");
     setDrawerOpen(true);
+    setShowAuditLogs(false);
   };
 
   const handleCloseDrawer = () => {
     setDrawerOpen(false);
-    setTimeout(() => setSelectedApp(null), 300);
+    setTimeout(() => {
+      setEditingAppId(null);
+      setPatchForm(initFormFromApp(undefined));
+    }, 300);
+  };
+
+  const handleSaveConfig = () => {
+    if (!editingAppId) return;
+    updateApplication(editingAppId, {
+      name: patchForm.name,
+      code: patchForm.code,
+      description: patchForm.description,
+      category: patchForm.category,
+      status: patchForm.status,
+      protocol: patchForm.protocol,
+      clientId: patchForm.clientId,
+      callbackUrls: patchForm.callbackUrlsText
+        .split("\n")
+        .map((s) => s.trim())
+        .filter(Boolean),
+      logoutUrls: patchForm.logoutUrlsText
+        .split("\n")
+        .map((s) => s.trim())
+        .filter(Boolean),
+      ipWhitelist: patchForm.ipWhitelistText
+        .split("\n")
+        .map((s) => s.trim())
+        .filter(Boolean),
+      mfaRequired: patchForm.mfaRequired,
+      accessHours:
+        patchForm.accessHoursStart && patchForm.accessHoursEnd
+          ? { start: patchForm.accessHoursStart, end: patchForm.accessHoursEnd }
+          : undefined,
+    });
+    toast.success("应用配置已保存");
+    handleCloseDrawer();
+  };
+
+  const setField = <K extends keyof AppFormState>(key: K, value: AppFormState[K]) => {
+    setPatchForm((p) => ({ ...p, [key]: value }));
+  };
+
+  const handleRegenerateClientId = () => {
+    const newId = genRandomClientId();
+    setField("clientId", newId);
+    toast.success("ClientID 已重新生成");
+    if (editingAppId) {
+      addAuditLog({
+        module: "应用接入",
+        action: "重新生成ClientID",
+        targetId: editingAppId,
+        targetName: currentApp?.name,
+        beforeValue: patchForm.clientId,
+        afterValue: newId,
+      });
+    }
+  };
+
+  const handleRegenerateSecret = () => {
+    const newSecret = genRandomSecret();
+    setField("clientSecret", newSecret);
+    toast.success("ClientSecret 已重新生成");
+    if (editingAppId) {
+      addAuditLog({
+        module: "应用接入",
+        action: "重新生成ClientSecret",
+        targetId: editingAppId,
+        targetName: currentApp?.name,
+        beforeValue: "******",
+        afterValue: "******",
+      });
+    }
+  };
+
+  const handleCreateApp = () => {
+    if (!newAppForm.name || !newAppForm.code) {
+      toast.warn("请填写应用名称和编码");
+      return;
+    }
+    addAuditLog({
+      module: "应用接入",
+      action: "提交新增应用",
+      targetId: `new-${Date.now()}`,
+      targetName: newAppForm.name,
+      beforeValue: "-",
+      afterValue: `{code: ${newAppForm.code}, category: ${newAppForm.category}, protocol: ${newAppForm.protocol}}`,
+    });
+    toast.success("应用创建请求已提交，预计5分钟内完成接入");
+    setNewAppOpen(false);
+    setNewAppForm({ name: "", code: "", description: "", category: "办公协作", protocol: "OIDC" });
   };
 
   return (
@@ -174,7 +370,7 @@ export default function Applications() {
             <BookOpen className="w-4 h-4" />
             <span>接入文档</span>
           </button>
-          <button className="btn-primary">
+          <button className="btn-primary" onClick={() => setNewAppOpen(true)}>
             <SquarePlus className="w-4 h-4" />
             <span>新增应用</span>
           </button>
@@ -269,7 +465,7 @@ export default function Applications() {
               stats={appLoginStats.get(app.id)}
               index={idx}
               onToggleStatus={handleToggleStatus}
-              onConfigure={() => handleOpenDrawer(app)}
+              onConfigure={() => handleOpenDrawer(app.id)}
             />
           ))}
           {filteredApps.length === 0 && (
@@ -363,7 +559,7 @@ export default function Applications() {
                     </td>
                     <td className="table-td text-right">
                       <button
-                        onClick={() => handleOpenDrawer(app)}
+                        onClick={() => handleOpenDrawer(app.id)}
                         className="btn-ghost !py-1 !px-2 text-brand-600 hover:bg-brand-50 hover:text-brand-700"
                       >
                         <span>配置</span>
@@ -478,14 +674,215 @@ export default function Applications() {
         </div>
       </section>
 
-      {drawerOpen && selectedApp && (
-        <AppDetailDrawer
-          app={selectedApp}
-          activeTab={drawerTab}
-          onTabChange={setDrawerTab}
-          onClose={handleCloseDrawer}
-          usageStats={mockAppUsageStats.find((s) => s.appId === selectedApp.id)}
-        />
+      <Drawer
+        open={drawerOpen}
+        onClose={handleCloseDrawer}
+        title={currentApp?.name || "应用配置"}
+        description={currentApp?.code || ""}
+        width="w-[680px]"
+        footer={
+          <>
+            <button onClick={handleCloseDrawer} className="btn-secondary">
+              取消
+            </button>
+            <button onClick={handleSaveConfig} className="btn-primary">
+              保存配置
+            </button>
+          </>
+        }
+      >
+        {currentApp && (
+          <AppDetailContent
+            app={currentApp}
+            activeTab={drawerTab}
+            onTabChange={setDrawerTab}
+            patchForm={patchForm}
+            setField={setField}
+            onRegenerateClientId={handleRegenerateClientId}
+            onRegenerateSecret={handleRegenerateSecret}
+            usageStats={mockAppUsageStats.find((s) => s.appId === currentApp.id)}
+          />
+        )}
+
+        <div className="mt-6 pt-4 border-t border-ink-200">
+          <button
+            onClick={() => setShowAuditLogs((v) => !v)}
+            className="flex items-center justify-between w-full text-left text-xs font-medium text-ink-600 hover:text-ink-800 py-2"
+          >
+            <span className="flex items-center gap-1.5">
+              <Activity className="w-3.5 h-3.5" />
+              最近 {appAuditLogs.length} 条变更记录
+            </span>
+            {showAuditLogs ? (
+              <ChevronUp className="w-4 h-4" />
+            ) : (
+              <ChevronRight className="w-4 h-4" />
+            )}
+          </button>
+          {showAuditLogs && (
+            <div className="mt-2 space-y-2 max-h-60 overflow-y-auto">
+              {appAuditLogs.length === 0 ? (
+                <div className="text-xs text-ink-400 py-4 text-center">
+                  暂无变更记录
+                </div>
+              ) : (
+                appAuditLogs.map((log) => (
+                  <AuditLogItem key={log.id} log={log} />
+                ))
+              )}
+            </div>
+          )}
+        </div>
+      </Drawer>
+
+      <Modal
+        open={confirmDisableOpen}
+        onClose={() => {
+          setConfirmDisableOpen(false);
+          setPendingToggleId(null);
+        }}
+        title="确认停用应用"
+        description="停用后用户将无法通过SSO访问该应用"
+        icon={<AlertTriangle className="w-5 h-5 text-warn-600" />}
+        footer={
+          <>
+            <button
+              onClick={() => {
+                setConfirmDisableOpen(false);
+                setPendingToggleId(null);
+              }}
+              className="btn-secondary"
+            >
+              取消
+            </button>
+            <button onClick={confirmDisable} className="btn-danger">
+              确认停用
+            </button>
+          </>
+        }
+      >
+        <div className="text-sm text-ink-600">
+          确定要停用该应用吗？停用后所有用户将无法通过单点登录访问此应用，直到重新启用。
+        </div>
+      </Modal>
+
+      <Modal
+        open={newAppOpen}
+        onClose={() => setNewAppOpen(false)}
+        title="新增应用"
+        description="填写应用基础信息，提交后由系统管理员完成接入"
+        icon={<SquarePlus className="w-5 h-5 text-brand-600" />}
+        footer={
+          <>
+            <button onClick={() => setNewAppOpen(false)} className="btn-secondary">
+              取消
+            </button>
+            <button onClick={handleCreateApp} className="btn-primary">
+              提交申请
+            </button>
+          </>
+        }
+      >
+        <div className="space-y-4">
+          <div className="grid grid-cols-2 gap-4">
+            <FormField label="应用名称" required>
+              <input
+                type="text"
+                placeholder="例如：销售管理系统"
+                value={newAppForm.name}
+                onChange={(e) =>
+                  setNewAppForm((p) => ({ ...p, name: e.target.value }))
+                }
+                className="input-base"
+              />
+            </FormField>
+            <FormField label="应用编码" required>
+              <input
+                type="text"
+                placeholder="例如：SALE-SYS"
+                value={newAppForm.code}
+                onChange={(e) =>
+                  setNewAppForm((p) => ({ ...p, code: e.target.value.toUpperCase() }))
+                }
+                className="input-base font-mono"
+              />
+            </FormField>
+          </div>
+          <FormField label="应用描述">
+            <textarea
+              placeholder="简要说明应用用途和接入范围"
+              rows={3}
+              value={newAppForm.description}
+              onChange={(e) =>
+                setNewAppForm((p) => ({ ...p, description: e.target.value }))
+              }
+              className="input-base resize-none"
+            />
+          </FormField>
+          <div className="grid grid-cols-2 gap-4">
+            <FormField label="应用分类" required>
+              <select
+                value={newAppForm.category}
+                onChange={(e) =>
+                  setNewAppForm((p) => ({
+                    ...p,
+                    category: e.target.value as (typeof CATEGORIES)[number],
+                  }))
+                }
+                className="input-base"
+              >
+                {CATEGORIES.slice(1).map((c) => (
+                  <option key={c} value={c}>
+                    {c}
+                  </option>
+                ))}
+              </select>
+            </FormField>
+            <FormField label="SSO协议" required>
+              <select
+                value={newAppForm.protocol}
+                onChange={(e) =>
+                  setNewAppForm((p) => ({
+                    ...p,
+                    protocol: e.target.value as AppProtocol,
+                  }))
+                }
+                className="input-base"
+              >
+                {PROTOCOLS.map((p) => (
+                  <option key={p} value={p}>
+                    {p}
+                  </option>
+                ))}
+              </select>
+            </FormField>
+          </div>
+        </div>
+      </Modal>
+    </div>
+  );
+}
+
+function AuditLogItem({ log }: { log: AuditLog }) {
+  return (
+    <div className="p-3 rounded-md bg-ink-50 border border-ink-100">
+      <div className="flex items-start justify-between gap-2">
+        <div className="flex items-center gap-2 min-w-0">
+          <span className="px-2 py-0.5 rounded text-[10px] font-medium bg-brand-100 text-brand-700 shrink-0">
+            {log.action}
+          </span>
+          <span className="text-xs font-medium text-ink-700 truncate">
+            {log.operatorName}
+          </span>
+        </div>
+        <span className="text-[10px] text-ink-400 font-mono shrink-0">
+          {log.operateAt.slice(5)}
+        </span>
+      </div>
+      {log.afterValue && log.afterValue !== "-" && (
+        <div className="mt-1.5 text-[11px] text-ink-500 break-all">
+          {log.afterValue}
+        </div>
       )}
     </div>
   );
@@ -542,6 +939,7 @@ function AppCard({
           <button
             className="p-1.5 rounded-md text-ink-400 hover:text-ink-600 hover:bg-ink-100 transition-colors"
             title="更多操作"
+            onClick={onConfigure}
           >
             <MoreHorizontal className="w-4 h-4" />
           </button>
@@ -637,11 +1035,14 @@ function Switch({ checked, onChange, label }: SwitchProps) {
   );
 }
 
-interface AppDetailDrawerProps {
+interface AppDetailContentProps {
   app: Application;
   activeTab: DrawerTabKey;
   onTabChange: (tab: DrawerTabKey) => void;
-  onClose: () => void;
+  patchForm: AppFormState;
+  setField: <K extends keyof AppFormState>(key: K, value: AppFormState[K]) => void;
+  onRegenerateClientId: () => void;
+  onRegenerateSecret: () => void;
   usageStats?: {
     loginCount: number;
     uniqueUsers: number;
@@ -649,13 +1050,16 @@ interface AppDetailDrawerProps {
   };
 }
 
-function AppDetailDrawer({
+function AppDetailContent({
   app,
   activeTab,
   onTabChange,
-  onClose,
+  patchForm,
+  setField,
+  onRegenerateClientId,
+  onRegenerateSecret,
   usageStats,
-}: AppDetailDrawerProps) {
+}: AppDetailContentProps) {
   const [showSecret, setShowSecret] = useState(false);
   const [copiedField, setCopiedField] = useState<string | null>(null);
 
@@ -665,157 +1069,132 @@ function AppDetailDrawer({
     setTimeout(() => setCopiedField(null), 2000);
   };
 
-  const handleRegenerate = (field: string) => {
-    setCopiedField(`regen-${field}`);
-    setTimeout(() => setCopiedField(null), 2000);
-  };
-
   const failRate =
     usageStats && usageStats.loginCount > 0
       ? ((usageStats.failCount / usageStats.loginCount) * 100).toFixed(1) + "%"
       : "0%";
 
   return (
-    <>
-      <div
-        className="fixed inset-0 bg-ink-900/40 backdrop-blur-soft z-40 transition-opacity animate-fade-in-up"
-        onClick={onClose}
-      />
-      <div className="fixed top-0 right-0 bottom-0 w-full max-w-2xl bg-white z-50 shadow-2xl border-l border-ink-200 flex flex-col animate-slide-in-right">
-        <div className="flex items-start justify-between p-5 border-b border-ink-200">
-          <div className="flex items-start gap-3">
-            <div
-              className={cn(
-                "w-12 h-12 rounded-lg flex items-center justify-center text-2xl font-bold text-white bg-gradient-to-br",
-                categoryGradientMap[app.category] || categoryGradientMap["办公协作"]
-              )}
-            >
-              {app.name.charAt(0)}
-            </div>
-            <div>
-              <h2 className="font-display text-xl font-bold text-ink-800">
-                {app.name}
-              </h2>
-              <div className="flex items-center gap-2 mt-1">
-                <span className="font-mono text-xs text-ink-400">
-                  {app.code}
-                </span>
-                <span className={protocolBadgeMap[app.protocol]}>
-                  {app.protocol}
-                </span>
-                <span
-                  className={cn(
-                    "badge",
-                    app.status === "enabled"
-                      ? "badge-safe"
-                      : "badge-neutral"
-                  )}
-                >
-                  {statusLabelMap[app.status]}
-                </span>
-              </div>
-            </div>
-          </div>
-          <button
-            onClick={onClose}
-            className="p-2 rounded-md text-ink-400 hover:text-ink-600 hover:bg-ink-100 transition-colors"
+    <div className="flex flex-col h-full">
+      <div className="flex items-center gap-3 mb-4">
+        <div
+          className={cn(
+            "w-10 h-10 rounded-lg flex items-center justify-center text-xl font-bold text-white bg-gradient-to-br",
+            categoryGradientMap[app.category] || categoryGradientMap["办公协作"]
+          )}
+        >
+          {app.name.charAt(0)}
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <span
+            className={cn(
+              "badge",
+              patchForm.status === "enabled" ? "badge-safe" : "badge-neutral"
+            )}
           >
-            <X className="w-5 h-5" />
-          </button>
-        </div>
-
-        <div className="flex border-b border-ink-200 px-3">
-          {DRAWER_TABS.map((tab) => {
-            const Icon = tab.icon;
-            const isActive = activeTab === tab.key;
-            return (
-              <button
-                key={tab.key}
-                onClick={() => onTabChange(tab.key)}
-                className={cn(
-                  "flex items-center gap-1.5 px-4 py-3 text-sm font-medium border-b-2 -mb-px transition-colors",
-                  isActive
-                    ? "border-brand-600 text-brand-700"
-                    : "border-transparent text-ink-500 hover:text-ink-700"
-                )}
-              >
-                <Icon className="w-4 h-4" />
-                {tab.label}
-              </button>
-            );
-          })}
-        </div>
-
-        <div className="flex-1 overflow-y-auto p-5 scrollbar-thin">
-          {activeTab === "basic" && <BasicConfigTab app={app} />}
-          {activeTab === "protocol" && (
-            <ProtocolConfigTab
-              app={app}
-              showSecret={showSecret}
-              onToggleSecret={() => setShowSecret((v) => !v)}
-              copiedField={copiedField}
-              onCopy={handleCopy}
-              onRegenerate={handleRegenerate}
-            />
-          )}
-          {activeTab === "policy" && <AccessPolicyTab app={app} />}
-          {activeTab === "stats" && (
-            <StatsTab app={app} usageStats={usageStats} failRate={failRate} />
-          )}
-        </div>
-
-        <div className="flex items-center justify-end gap-2 p-4 border-t border-ink-200 bg-ink-50/50">
-          <button onClick={onClose} className="btn-secondary">
-            取消
-          </button>
-          <button className="btn-primary">保存配置</button>
+            {statusLabelMap[patchForm.status]}
+          </span>
+          <span className={protocolBadgeMap[patchForm.protocol]}>
+            {patchForm.protocol}
+          </span>
         </div>
       </div>
-    </>
+
+      <div className="flex border-b border-ink-200 -mx-6 px-6 mb-4 overflow-x-auto">
+        {DRAWER_TABS.map((tab) => {
+          const Icon = tab.icon;
+          const isActive = activeTab === tab.key;
+          return (
+            <button
+              key={tab.key}
+              onClick={() => onTabChange(tab.key)}
+              className={cn(
+                "flex items-center gap-1.5 px-3 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors whitespace-nowrap shrink-0",
+                isActive
+                  ? "border-brand-600 text-brand-700"
+                  : "border-transparent text-ink-500 hover:text-ink-700"
+              )}
+            >
+              <Icon className="w-4 h-4" />
+              {tab.label}
+            </button>
+          );
+        })}
+      </div>
+
+      <div className="flex-1 overflow-y-auto -mx-2 px-2 pb-4">
+        {activeTab === "basic" && (
+          <BasicConfigTab app={app} patchForm={patchForm} setField={setField} />
+        )}
+        {activeTab === "protocol" && (
+          <ProtocolConfigTab
+            app={app}
+            patchForm={patchForm}
+            setField={setField}
+            showSecret={showSecret}
+            onToggleSecret={() => setShowSecret((v) => !v)}
+            copiedField={copiedField}
+            onCopy={handleCopy}
+            onRegenerateClientId={onRegenerateClientId}
+            onRegenerateSecret={onRegenerateSecret}
+          />
+        )}
+        {activeTab === "policy" && (
+          <AccessPolicyTab app={app!} patchForm={patchForm} setField={setField} />
+        )}
+        {activeTab === "stats" && (
+          <StatsTab app={app} usageStats={usageStats} failRate={failRate} />
+        )}
+      </div>
+    </div>
   );
 }
 
-function BasicConfigTab({ app }: { app: Application }) {
+function BasicConfigTab({
+  patchForm,
+  setField,
+}: {
+  app: Application;
+  patchForm: AppFormState;
+  setField: <K extends keyof AppFormState>(key: K, value: AppFormState[K]) => void;
+}) {
   return (
     <div className="space-y-5">
       <SectionTitle title="基础信息" desc="应用的基本标识信息" />
       <div className="grid grid-cols-2 gap-4">
         <FormField label="应用名称" required>
-          <input type="text" defaultValue={app.name} className="input-base" />
+          <input
+            type="text"
+            value={patchForm.name}
+            onChange={(e) => setField("name", e.target.value)}
+            className="input-base"
+          />
         </FormField>
         <FormField label="应用编码" required>
           <input
             type="text"
-            defaultValue={app.code}
+            value={patchForm.code}
+            onChange={(e) => setField("code", e.target.value)}
             className="input-base font-mono"
           />
         </FormField>
       </div>
       <FormField label="应用描述">
         <textarea
-          defaultValue={app.description}
+          value={patchForm.description}
+          onChange={(e) => setField("description", e.target.value)}
           rows={3}
           className="input-base resize-none"
         />
       </FormField>
-      <FormField label="应用Logo">
-        <div className="flex items-center gap-4">
-          <div
-            className={cn(
-              "w-16 h-16 rounded-xl flex items-center justify-center text-3xl font-bold text-white bg-gradient-to-br",
-              categoryGradientMap[app.category] || categoryGradientMap["办公协作"]
-            )}
-          >
-            {app.name.charAt(0)}
-          </div>
-          <div className="flex gap-2">
-            <button className="btn-secondary">上传Logo</button>
-            <button className="btn-ghost">移除</button>
-          </div>
-        </div>
-      </FormField>
       <FormField label="应用分类" required>
-        <select defaultValue={app.category} className="input-base">
+        <select
+          value={patchForm.category}
+          onChange={(e) =>
+            setField("category", e.target.value as (typeof CATEGORIES)[number])
+          }
+          className="input-base"
+        >
           {CATEGORIES.slice(1).map((c) => (
             <option key={c} value={c}>
               {c}
@@ -823,43 +1202,62 @@ function BasicConfigTab({ app }: { app: Application }) {
           ))}
         </select>
       </FormField>
-      <div className="pt-2">
-        <div className="text-xs text-ink-400">
-          创建时间：{app.createdAt}
+      <FormField label="应用状态">
+        <div className="flex items-center gap-3 p-3 rounded-md bg-ink-50 border border-ink-200">
+          <div className="flex-1">
+            <div className="text-sm font-medium text-ink-800">启用应用</div>
+            <div className="text-xs text-ink-500 mt-0.5">
+              停用后用户将无法通过SSO访问此应用
+            </div>
+          </div>
+          <Switch
+            checked={patchForm.status === "enabled"}
+            onChange={() =>
+              setField("status", patchForm.status === "enabled" ? "disabled" : "enabled")
+            }
+          />
         </div>
-      </div>
+      </FormField>
     </div>
   );
 }
 
 interface ProtocolConfigProps {
   app: Application;
+  patchForm: AppFormState;
+  setField: <K extends keyof AppFormState>(key: K, value: AppFormState[K]) => void;
   showSecret: boolean;
   onToggleSecret: () => void;
   copiedField: string | null;
   onCopy: (text: string, field: string) => void;
-  onRegenerate: (field: string) => void;
+  onRegenerateClientId: () => void;
+  onRegenerateSecret: () => void;
 }
 
 function ProtocolConfigTab({
-  app,
+  patchForm,
+  setField,
   showSecret,
   onToggleSecret,
   copiedField,
   onCopy,
-  onRegenerate,
+  onRegenerateClientId,
+  onRegenerateSecret,
 }: ProtocolConfigProps) {
+  const showClientFields =
+    patchForm.protocol === "OIDC" || patchForm.protocol === "OAuth2";
+
   return (
     <div className="space-y-5">
       <SectionTitle title="协议类型" desc="选择与应用对接的单点登录协议" />
       <FormField label="SSO协议" required>
         <div className="grid grid-cols-4 gap-2">
-          {(["OIDC", "SAML", "CAS", "OAuth2"] as AppProtocol[]).map((p) => (
+          {PROTOCOLS.map((p) => (
             <label
               key={p}
               className={cn(
                 "flex items-center justify-center p-3 rounded-md border-2 cursor-pointer transition-all",
-                app.protocol === p
+                patchForm.protocol === p
                   ? "border-brand-500 bg-brand-50"
                   : "border-ink-200 hover:border-ink-300"
               )}
@@ -867,13 +1265,14 @@ function ProtocolConfigTab({
               <input
                 type="radio"
                 name="protocol"
-                defaultChecked={app.protocol === p}
+                checked={patchForm.protocol === p}
+                onChange={() => setField("protocol", p)}
                 className="sr-only"
               />
               <span
                 className={cn(
                   "text-sm font-semibold",
-                  app.protocol === p ? "text-brand-700" : "text-ink-600"
+                  patchForm.protocol === p ? "text-brand-700" : "text-ink-600"
                 )}
               >
                 {p}
@@ -883,7 +1282,7 @@ function ProtocolConfigTab({
         </div>
       </FormField>
 
-      {(app.protocol === "OIDC" || app.protocol === "OAuth2") && (
+      {showClientFields && (
         <>
           <SectionTitle title="客户端凭证" desc="用于应用身份认证的密钥信息" />
           <FormField label="Client ID">
@@ -892,18 +1291,29 @@ function ProtocolConfigTab({
                 <input
                   type="text"
                   readOnly
-                  defaultValue={app.clientId}
-                  className="input-base font-mono text-xs pr-20"
+                  value={patchForm.clientId}
+                  className="input-base font-mono text-xs pr-28"
                 />
-                <button
-                  onClick={() =>
-                    onCopy(app.clientId || "", "clientId")
-                  }
-                  className="absolute right-2 top-1/2 -translate-y-1/2 inline-flex items-center gap-1 px-2 py-1 rounded text-xs font-medium text-brand-600 hover:bg-brand-50 transition-colors"
-                >
-                  <Copy className="w-3 h-3" />
-                  {copiedField === "clientId" ? "已复制" : "复制"}
-                </button>
+                <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
+                  <button
+                    onClick={() => onCopy(patchForm.clientId, "clientId")}
+                    className="px-2 py-1 rounded text-xs font-medium text-brand-600 hover:bg-brand-50 transition-colors"
+                  >
+                    {copiedField === "clientId" ? "已复制" : "复制"}
+                  </button>
+                  <button
+                    onClick={onRegenerateClientId}
+                    className="p-1 rounded text-warn-500 hover:text-warn-600 hover:bg-warn-50 transition-colors"
+                    title="重新生成"
+                  >
+                    <RefreshCw
+                      className={cn(
+                        "w-3.5 h-3.5",
+                        copiedField === "regen-clientId" && "animate-spin"
+                      )}
+                    />
+                  </button>
+                </div>
               </div>
             </div>
           </FormField>
@@ -914,7 +1324,7 @@ function ProtocolConfigTab({
                 <input
                   type={showSecret ? "text" : "password"}
                   readOnly
-                  defaultValue="sk-live-8f3d2a9c1e7b4f5a8d2c6e9b0a1f3d5e"
+                  value={patchForm.clientSecret}
                   className="input-base font-mono text-xs pr-28"
                 />
                 <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
@@ -930,16 +1340,14 @@ function ProtocolConfigTab({
                     )}
                   </button>
                   <button
-                    onClick={() =>
-                      onCopy("sk-live-8f3d2a9c1e7b4f5a8d2c6e9b0a1f3d5e", "secret")
-                    }
+                    onClick={() => onCopy(patchForm.clientSecret, "secret")}
                     className="p-1 rounded text-ink-400 hover:text-ink-600 hover:bg-ink-100 transition-colors"
                     title="复制"
                   >
                     <Copy className="w-3.5 h-3.5" />
                   </button>
                   <button
-                    onClick={() => onRegenerate("secret")}
+                    onClick={onRegenerateSecret}
                     className="p-1 rounded text-warn-500 hover:text-warn-600 hover:bg-warn-50 transition-colors"
                     title="重新生成"
                   >
@@ -960,41 +1368,78 @@ function ProtocolConfigTab({
         </>
       )}
 
+      {patchForm.protocol === "SAML" && (
+        <div className="p-4 rounded-md bg-amber-50 border border-amber-200">
+          <SectionTitle
+            title="SAML 证书配置"
+            desc="上传 SAML 协议所需的身份提供者证书"
+          />
+          <div className="mt-3 border-2 border-dashed border-amber-300 rounded-md p-8 text-center">
+            <KeyRound className="w-8 h-8 text-amber-400 mx-auto mb-2" />
+            <div className="text-sm text-amber-700 font-medium">上传证书文件</div>
+            <div className="text-xs text-amber-500 mt-1">支持 .pem / .cer / .crt 格式</div>
+            <button className="mt-3 px-4 py-1.5 text-xs font-medium rounded-md bg-white border border-amber-300 text-amber-700 hover:bg-amber-100 transition-colors">
+              选择文件
+            </button>
+          </div>
+        </div>
+      )}
+
       <SectionTitle title="回调地址" desc="用户登录成功后的跳转地址" />
-      <UrlList
-        label="回调 URL"
-        urls={app.callbackUrls}
-        placeholder="https://app.example.com/callback"
-      />
+      <FormField label="回调 URL（每行一个）">
+        <textarea
+          value={patchForm.callbackUrlsText}
+          onChange={(e) => setField("callbackUrlsText", e.target.value)}
+          rows={3}
+          placeholder="https://app.example.com/callback"
+          className="input-base font-mono text-xs resize-none"
+        />
+      </FormField>
 
       <SectionTitle title="登出地址" desc="用户登出后的跳转地址（可选）" />
-      <UrlList
-        label="登出 URL"
-        urls={app.logoutUrls}
-        placeholder="https://app.example.com/logout"
-      />
+      <FormField label="登出 URL（每行一个）">
+        <textarea
+          value={patchForm.logoutUrlsText}
+          onChange={(e) => setField("logoutUrlsText", e.target.value)}
+          rows={3}
+          placeholder="https://app.example.com/logout"
+          className="input-base font-mono text-xs resize-none"
+        />
+      </FormField>
     </div>
   );
 }
 
-function AccessPolicyTab({ app }: { app: Application }) {
-  const [forceMfa, setForceMfa] = useState(app.mfaRequired);
-  const [startHour, setStartHour] = useState(app.accessHours?.start || "09:00");
-  const [endHour, setEndHour] = useState(app.accessHours?.end || "18:00");
+function AccessPolicyTab({
+  patchForm,
+  setField,
+}: {
+  app: Application;
+  patchForm: AppFormState;
+  setField: <K extends keyof AppFormState>(key: K, value: AppFormState[K]) => void;
+}) {
+  const ipCount = patchForm.ipWhitelistText
+    .split("\n")
+    .map((s) => s.trim())
+    .filter(Boolean).length;
 
   return (
     <div className="space-y-5">
-      <SectionTitle title="IP白名单" desc="仅允许列表内的IP网段访问（留空表示不限制）" />
+      <SectionTitle
+        title="IP白名单"
+        desc="仅允许列表内的IP网段访问（留空表示不限制）"
+      />
       <FormField label="允许的IP/网段">
         <textarea
-          defaultValue={app.ipWhitelist.join("\n")}
+          value={patchForm.ipWhitelistText}
+          onChange={(e) => setField("ipWhitelistText", e.target.value)}
           rows={4}
           placeholder="每行一个，支持单IP或CIDR格式，如：&#10;10.0.0.0/8&#10;192.168.1.100"
           className="input-base font-mono text-xs resize-none"
         />
       </FormField>
       <div className="text-xs text-ink-400 -mt-3">
-        当前已配置 {app.ipWhitelist.length} 条白名单规则
+        当前已配置 {ipCount} 条白名单规则
       </div>
 
       <SectionTitle title="访问时段" desc="限制用户允许登录的时间范围" />
@@ -1002,20 +1447,23 @@ function AccessPolicyTab({ app }: { app: Application }) {
         <FormField label="开始时间">
           <input
             type="time"
-            value={startHour}
-            onChange={(e) => setStartHour(e.target.value)}
+            value={patchForm.accessHoursStart}
+            onChange={(e) => setField("accessHoursStart", e.target.value)}
             className="input-base"
           />
         </FormField>
         <FormField label="结束时间">
           <input
             type="time"
-            value={endHour}
-            onChange={(e) => setEndHour(e.target.value)}
+            value={patchForm.accessHoursEnd}
+            onChange={(e) => setField("accessHoursEnd", e.target.value)}
             className="input-base"
           />
         </FormField>
       </div>
+      {!patchForm.accessHoursStart && !patchForm.accessHoursEnd && (
+        <div className="text-xs text-ink-400 -mt-3">未设置时段，默认全天允许访问</div>
+      )}
 
       <SectionTitle title="安全策略" desc="增强访问安全的配置项" />
       <div className="space-y-3">
@@ -1029,19 +1477,23 @@ function AccessPolicyTab({ app }: { app: Application }) {
             </div>
           </div>
           <Switch
-            checked={forceMfa}
-            onChange={() => setForceMfa((v) => !v)}
+            checked={patchForm.mfaRequired}
+            onChange={() => setField("mfaRequired", !patchForm.mfaRequired)}
           />
         </div>
 
-        <FormField label="会话有效期（分钟）">
-          <input
-            type="number"
-            defaultValue={480}
-            min={5}
-            max={1440}
+        <FormField label="会话有效期">
+          <select
+            value={patchForm.sessionDuration}
+            onChange={(e) => setField("sessionDuration", e.target.value)}
             className="input-base"
-          />
+          >
+            {SESSION_DURATION_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
+          </select>
         </FormField>
       </div>
     </div>
@@ -1207,53 +1659,6 @@ function FormField({
         {required && <span className="text-danger-500 ml-0.5">*</span>}
       </label>
       {children}
-    </div>
-  );
-}
-
-function UrlList({
-  label,
-  urls,
-  placeholder,
-}: {
-  label: string;
-  urls: string[];
-  placeholder: string;
-}) {
-  const [items, setItems] = useState<string[]>(urls.length > 0 ? urls : [""]);
-
-  return (
-    <div className="space-y-2">
-      {items.map((url, idx) => (
-        <div key={idx} className="flex items-center gap-2">
-          <input
-            type="url"
-            defaultValue={url}
-            placeholder={placeholder}
-            className="input-base font-mono text-xs"
-          />
-          <button
-            onClick={() =>
-              setItems((prev) =>
-                prev.length > 1
-                  ? prev.filter((_, i) => i !== idx)
-                  : [""]
-              )
-            }
-            className="p-2 rounded-md text-ink-400 hover:text-danger-500 hover:bg-danger-50 transition-colors shrink-0"
-            title="移除"
-          >
-            <X className="w-4 h-4" />
-          </button>
-        </div>
-      ))}
-      <button
-        onClick={() => setItems((prev) => [...prev, ""])}
-        className="inline-flex items-center gap-1 px-3 py-1.5 rounded-md text-xs font-medium text-brand-600 hover:bg-brand-50 transition-colors"
-      >
-        <SquarePlus className="w-3.5 h-3.5" />
-        添加{label}
-      </button>
     </div>
   );
 }

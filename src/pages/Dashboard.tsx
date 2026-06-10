@@ -1,4 +1,5 @@
 import { useMemo } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   UserPlus,
   Upload,
@@ -30,12 +31,9 @@ import {
   PieChart,
   Pie,
 } from "recharts";
-import {
-  mockAppUsageStats,
-  mockRiskEvents,
-  mockAuditLogs,
-  generateTrendData,
-} from "@/mock";
+import { mockAppUsageStats, generateTrendData } from "@/mock";
+import { useAppStore } from "@/stores/useAppStore";
+import { toast } from "@/components/ui/Modal";
 import type { RiskLevel } from "@/types";
 
 const levelBadgeMap: Record<RiskLevel, string> = {
@@ -51,6 +49,15 @@ const levelLabelMap: Record<RiskLevel, string> = {
 };
 
 export default function Dashboard() {
+  const navigate = useNavigate();
+  const users = useAppStore((s) => s.users);
+  const applications = useAppStore((s) => s.applications);
+  const sessions = useAppStore((s) => s.sessions);
+  const permissionRequests = useAppStore((s) => s.permissionRequests);
+  const riskEvents = useAppStore((s) => s.riskEvents);
+  const auditLogs = useAppStore((s) => s.auditLogs);
+  const handleRiskEvent = useAppStore((s) => s.handleRiskEvent);
+
   const trendData = useMemo(() => generateTrendData(), []);
   const topAppUsage = useMemo(
     () =>
@@ -60,10 +67,27 @@ export default function Dashboard() {
     []
   );
   const pendingRisks = useMemo(
-    () => mockRiskEvents.filter((r) => r.status === "pending"),
-    []
+    () => riskEvents.filter((r) => r.status === "pending"),
+    [riskEvents]
   );
-  const recentAudits = useMemo(() => mockAuditLogs.slice(0, 6), []);
+  const recentAudits = useMemo(() => auditLogs.slice(0, 6), [auditLogs]);
+
+  const onlineSessionCount = useMemo(
+    () => sessions.filter((s) => s.isOnline).length,
+    [sessions]
+  );
+  const activeUsersToday = useMemo(
+    () => users.filter((u) => u.status === "active").length,
+    [users]
+  );
+  const enabledApps = useMemo(
+    () => applications.filter((a) => a.status === "enabled").length,
+    [applications]
+  );
+  const pendingApprovalCount = useMemo(
+    () => permissionRequests.filter((r) => r.status === "pending").length,
+    [permissionRequests]
+  );
 
   const gaugeData = [
     { name: "成功", value: 7842, color: "#0D9488" },
@@ -82,19 +106,43 @@ export default function Dashboard() {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <button className="btn-primary">
+          <button
+            className="btn-primary"
+            onClick={() => {
+              navigate("/users");
+              toast.success("已跳转用户目录，可点击右上角「新增用户」");
+            }}
+          >
             <UserPlus className="w-4 h-4" />
             <span>新增用户</span>
           </button>
-          <button className="btn-secondary">
+          <button
+            className="btn-secondary"
+            onClick={() => {
+              navigate("/users");
+              toast.success("已跳转用户目录，可使用「批量导入」功能");
+            }}
+          >
             <Upload className="w-4 h-4" />
             <span>批量导入</span>
           </button>
-          <button className="btn-secondary">
+          <button
+            className="btn-secondary"
+            onClick={() => {
+              navigate("/applications");
+              toast.success("已跳转应用接入，可新建应用接入");
+            }}
+          >
             <SquarePlus className="w-4 h-4" />
             <span>创建应用</span>
           </button>
-          <button className="btn-secondary">
+          <button
+            className="btn-secondary"
+            onClick={() => {
+              navigate("/permissions");
+              toast.success("已跳转审批中心");
+            }}
+          >
             <FileCheck className="w-4 h-4" />
             <span>审批中心</span>
           </button>
@@ -103,70 +151,76 @@ export default function Dashboard() {
 
       <section className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
         <StatCard
-          className="animate-fade-in-up stagger-1"
+          className="animate-fade-in-up stagger-1 cursor-pointer transition-all hover:scale-[1.02]"
           gradient="from-brand-500 to-brand-300"
           icon={Users}
           iconColor="text-brand-600"
           iconBg="bg-brand-50"
           label="总用户数"
-          value="313"
+          value={users.length.toString()}
           trend={12.5}
           trendLabel="较昨日"
+          onClick={() => navigate("/users")}
         />
         <StatCard
-          className="animate-fade-in-up stagger-2"
+          className="animate-fade-in-up stagger-2 cursor-pointer transition-all hover:scale-[1.02]"
           gradient="from-safe-500 to-safe-200"
           icon={Activity}
           iconColor="text-safe-600"
           iconBg="bg-safe-50"
           label="今日活跃"
-          value="187"
+          value={activeUsersToday.toString()}
           trend={8.3}
           trendLabel="较昨日"
+          onClick={() => navigate("/users")}
         />
         <StatCard
-          className="animate-fade-in-up stagger-3"
+          className="animate-fade-in-up stagger-3 cursor-pointer transition-all hover:scale-[1.02]"
           gradient="from-brand-500 to-brand-300"
           icon={Monitor}
           iconColor="text-brand-600"
           iconBg="bg-brand-50"
           label="在线会话"
-          value="42"
+          value={onlineSessionCount.toString()}
           trend={8.3}
           trendLabel="较昨日"
+          onClick={() => navigate("/audit")}
         />
         <StatCard
-          className="animate-fade-in-up stagger-4"
+          className="animate-fade-in-up stagger-4 cursor-pointer transition-all hover:scale-[1.02]"
           gradient="from-safe-500 to-safe-200"
           icon={AppWindow}
           iconColor="text-safe-600"
           iconBg="bg-safe-50"
           label="接入应用"
-          value="8"
+          value={`${enabledApps}/${applications.length}`}
           trend={0}
           trendLabel="较昨日"
+          onClick={() => navigate("/applications")}
         />
         <StatCard
-          className="animate-fade-in-up stagger-5"
+          className="animate-fade-in-up stagger-5 cursor-pointer transition-all hover:scale-[1.02]"
           gradient="from-warn-500 to-warn-200"
           icon={Clock}
           iconColor="text-warn-600"
           iconBg="bg-warn-50"
           label="待审批"
-          value="3"
+          value={pendingApprovalCount.toString()}
           trend={-25}
           trendLabel="较昨日"
+          onClick={() => navigate("/permissions")}
         />
         <StatCard
-          className="animate-fade-in-up stagger-6"
+          className="animate-fade-in-up stagger-6 cursor-pointer transition-all hover:scale-[1.02]"
           gradient="from-danger-500 to-danger-200"
           icon={AlertTriangle}
           iconColor="text-danger-600"
           iconBg="bg-danger-50"
           label="风险告警"
-          value="3"
+          value={pendingRisks.length.toString()}
           trend={50}
           trendLabel="较昨日"
+          onClick={() => navigate("/risk")}
         />
       </section>
 
@@ -445,7 +499,21 @@ export default function Dashboard() {
                       {r.detectedAt.slice(5)}
                     </td>
                     <td className="table-td text-right">
-                      <button className="btn-ghost !py-1 !px-2 text-brand-600 hover:bg-brand-50 hover:text-brand-700">
+                      <button
+                        className="btn-ghost !py-1 !px-2 text-brand-600 hover:bg-brand-50 hover:text-brand-700"
+                        onClick={() => {
+                          handleRiskEvent(
+                            r.id,
+                            r.level === "high" ? "freeze" : "release",
+                            "总览快速处置"
+                          );
+                          toast.success(
+                            r.level === "high"
+                              ? `已冻结账号 ${r.userName}`
+                              : `已放行风险 ${r.userName}`
+                          );
+                        }}
+                      >
                         <Eye className="w-3.5 h-3.5" />
                         <span>处置</span>
                       </button>
@@ -534,6 +602,7 @@ interface StatCardProps {
   value: string;
   trend: number;
   trendLabel: string;
+  onClick?: () => void;
 }
 
 function StatCard({
@@ -546,13 +615,19 @@ function StatCard({
   value,
   trend,
   trendLabel,
+  onClick,
 }: StatCardProps) {
   const TrendIcon = trend > 0 ? TrendingUp : trend < 0 ? TrendingDown : Minus;
   const trendColor =
     trend > 0 ? "text-safe-600" : trend < 0 ? "text-danger-600" : "text-ink-400";
 
   return (
-    <div className={`card-base overflow-hidden ${className}`}>
+    <div
+      className={`card-base overflow-hidden ${className}${
+        onClick ? " cursor-pointer" : ""
+      }`}
+      onClick={onClick}
+    >
       <div className={`h-1 bg-gradient-to-r ${gradient}`} />
       <div className="p-4">
         <div className="flex items-start justify-between">

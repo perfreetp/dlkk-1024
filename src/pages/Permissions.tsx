@@ -23,7 +23,9 @@ import {
   FileText,
   ArrowRight,
 } from "lucide-react";
-import { mockRoles, mockPermissionRequests, mockDepartments, mockUsers } from "@/mock";
+import { mockRoles, mockDepartments, mockUsers } from "@/mock";
+import { useAppStore } from "@/stores/useAppStore";
+import { Modal, toast } from "@/components/ui/Modal";
 import type {
   Role,
   RoleType,
@@ -261,83 +263,11 @@ function getAllMenuIds(nodes: MenuPermissionNode[]): string[] {
   return ids;
 }
 
-interface OffboardUser {
+interface MenuPermissionNode {
   id: string;
   name: string;
-  departmentName: string;
-  positionName: string;
-  leaveDate: string;
-  permissions: string[];
-  riskLevel: RiskLevel;
-  status: OffboardStatusKey;
-  recycledAt?: string;
+  children?: MenuPermissionNode[];
 }
-
-const mockOffboardUsers: OffboardUser[] = [
-  {
-    id: "ou001",
-    name: "钱前",
-    departmentName: "后端开发组",
-    positionName: "后端工程师",
-    leaveDate: "2026-06-08",
-    permissions: ["普通用户", "财务审核员"],
-    riskLevel: "high",
-    status: "pending",
-  },
-  {
-    id: "ou002",
-    name: "孙逊",
-    departmentName: "信息安全部",
-    positionName: "安全工程师",
-    leaveDate: "2026-06-09",
-    permissions: ["安全审计员", "超级管理员"],
-    riskLevel: "high",
-    status: "pending",
-  },
-  {
-    id: "ou003",
-    name: "李丽",
-    departmentName: "市场营销部",
-    positionName: "市场专员",
-    leaveDate: "2026-06-10",
-    permissions: ["普通用户", "市场管理员"],
-    riskLevel: "medium",
-    status: "pending",
-  },
-  {
-    id: "ou004",
-    name: "周舟",
-    departmentName: "运营管理部",
-    positionName: "运营专员",
-    leaveDate: "2026-06-05",
-    permissions: ["普通用户"],
-    riskLevel: "low",
-    status: "recycled",
-    recycledAt: "2026-06-05 18:30:00",
-  },
-  {
-    id: "ou005",
-    name: "吴梧",
-    departmentName: "人力资源部",
-    positionName: "招聘专员",
-    leaveDate: "2026-06-03",
-    permissions: ["组织管理员", "普通用户"],
-    riskLevel: "medium",
-    status: "recycled",
-    recycledAt: "2026-06-03 20:15:00",
-  },
-  {
-    id: "ou006",
-    name: "郑峥",
-    departmentName: "前端开发组",
-    positionName: "前端工程师",
-    leaveDate: "2026-06-01",
-    permissions: ["普通用户"],
-    riskLevel: "low",
-    status: "recycled",
-    recycledAt: "2026-06-01 19:00:00",
-  },
-];
 
 function Switch({
   checked,
@@ -432,6 +362,7 @@ function RoleManagementPanel() {
   const [roleFilter, setRoleFilter] = useState<RoleFilterKey>("all");
   const [selectedRoleId, setSelectedRoleId] = useState<string>(mockRoles[0].id);
   const [detailTab, setDetailTab] = useState<RoleDetailTabKey>("menu");
+  const addAuditLog = useAppStore((s) => s.addAuditLog);
 
   const filteredRoles = useMemo(() => {
     if (roleFilter === "all") return mockRoles;
@@ -439,6 +370,42 @@ function RoleManagementPanel() {
   }, [roleFilter]);
 
   const selectedRole = mockRoles.find((r) => r.id === selectedRoleId) || mockRoles[0];
+
+  const handleEditRole = () => {
+    addAuditLog({
+      module: "权限角色",
+      action: "编辑角色",
+      targetId: selectedRole.id,
+      targetName: selectedRole.name,
+      beforeValue: "-",
+      afterValue: "打开编辑面板",
+    });
+    toast.success(`已打开编辑角色：${selectedRole.name}`);
+  };
+
+  const handleMemberManage = () => {
+    addAuditLog({
+      module: "权限角色",
+      action: "成员管理",
+      targetId: selectedRole.id,
+      targetName: selectedRole.name,
+      beforeValue: "-",
+      afterValue: "打开成员管理面板",
+    });
+    toast.success(`已打开成员管理：${selectedRole.name}`);
+  };
+
+  const handleCloneRole = () => {
+    addAuditLog({
+      module: "权限角色",
+      action: "克隆角色",
+      targetId: selectedRole.id,
+      targetName: selectedRole.name,
+      beforeValue: "-",
+      afterValue: `克隆为 ${selectedRole.name}（副本）`,
+    });
+    toast.success(`已克隆角色：${selectedRole.name}`);
+  };
 
   return (
     <div className="flex gap-4 h-[calc(100vh-260px)]">
@@ -499,15 +466,15 @@ function RoleManagementPanel() {
               <p className="mt-2 text-sm text-ink-500">{selectedRole.description}</p>
             </div>
             <div className="flex items-center gap-2 flex-shrink-0">
-              <button className="btn-secondary">
+              <button className="btn-secondary" onClick={handleEditRole}>
                 <Pencil className="w-4 h-4" />
                 <span>编辑角色</span>
               </button>
-              <button className="btn-secondary">
+              <button className="btn-secondary" onClick={handleMemberManage}>
                 <Users2 className="w-4 h-4" />
                 <span>成员管理</span>
               </button>
-              <button className="btn-secondary">
+              <button className="btn-secondary" onClick={handleCloneRole}>
                 <Copy className="w-4 h-4" />
                 <span>克隆</span>
               </button>
@@ -1113,9 +1080,11 @@ function ApprovalPanel() {
   const [filterTab, setFilterTab] = useState<ApprovalFilterKey>("pending");
   const [searchText, setSearchText] = useState("");
   const [approvalOpinions, setApprovalOpinions] = useState<Record<string, string>>({});
+  const permissionRequests = useAppStore((s) => s.permissionRequests);
+  const processPermissionRequest = useAppStore((s) => s.processPermissionRequest);
 
   const filteredRequests = useMemo(() => {
-    return mockPermissionRequests.filter((r) => {
+    return permissionRequests.filter((r) => {
       if (filterTab !== "all" && r.status !== filterTab) return false;
       if (searchText) {
         const kw = searchText.toLowerCase();
@@ -1128,9 +1097,30 @@ function ApprovalPanel() {
       }
       return true;
     });
-  }, [filterTab, searchText]);
+  }, [permissionRequests, filterTab, searchText]);
 
-  const pendingCount = mockPermissionRequests.filter((r) => r.status === "pending").length;
+  const pendingCount = permissionRequests.filter((r) => r.status === "pending").length;
+  const approvedCount = permissionRequests.filter((r) => r.status === "approved").length;
+  const rejectedCount = permissionRequests.filter((r) => r.status === "rejected").length;
+
+  const tabBadgeMap: Record<ApprovalFilterKey, number> = {
+    pending: pendingCount,
+    approved: approvedCount,
+    rejected: rejectedCount,
+    all: permissionRequests.length,
+  };
+
+  const handleApprove = (requestId: string) => {
+    const remark = approvalOpinions[requestId] || "";
+    processPermissionRequest(requestId, true, remark);
+    toast.success("审批已通过，角色权限已授予");
+  };
+
+  const handleReject = (requestId: string) => {
+    const remark = approvalOpinions[requestId] || "";
+    processPermissionRequest(requestId, false, remark);
+    toast.info("已驳回该权限申请");
+  };
 
   return (
     <div className="space-y-4">
@@ -1139,7 +1129,8 @@ function ApprovalPanel() {
           <div className="flex items-center gap-1 flex-wrap">
             {approvalFilterTabs.map((t) => {
               const isActive = filterTab === t.key;
-              const showBadge = t.key === "pending" && pendingCount > 0;
+              const count = tabBadgeMap[t.key];
+              const showBadge = count > 0;
               return (
                 <button
                   key={t.key}
@@ -1156,10 +1147,16 @@ function ApprovalPanel() {
                       className={`inline-flex items-center justify-center min-w-[18px] h-[18px] px-1.5 rounded-full text-[10px] font-semibold ${
                         isActive
                           ? "bg-white text-brand-700"
-                          : "bg-warn-100 text-warn-700"
+                          : t.key === "pending"
+                          ? "bg-warn-100 text-warn-700"
+                          : t.key === "approved"
+                          ? "bg-safe-100 text-safe-700"
+                          : t.key === "rejected"
+                          ? "bg-danger-100 text-danger-700"
+                          : "bg-ink-100 text-ink-600"
                       }`}
                     >
-                      {pendingCount}
+                      {count}
                     </span>
                   )}
                 </button>
@@ -1202,6 +1199,8 @@ function ApprovalPanel() {
             onOpinionChange={(v) =>
               setApprovalOpinions((prev) => ({ ...prev, [req.id]: v }))
             }
+            onApprove={() => handleApprove(req.id)}
+            onReject={() => handleReject(req.id)}
           />
         ))}
         {filteredRequests.length === 0 && (
@@ -1217,9 +1216,11 @@ interface ApprovalCardProps {
   index: number;
   opinion: string;
   onOpinionChange: (v: string) => void;
+  onApprove: () => void;
+  onReject: () => void;
 }
 
-function ApprovalCard({ request, index, opinion, onOpinionChange }: ApprovalCardProps) {
+function ApprovalCard({ request, index, opinion, onOpinionChange, onApprove, onReject }: ApprovalCardProps) {
   const initial = request.userName.charAt(0);
   const avatarCls = avatarColors[index % avatarColors.length];
   const isPending = request.status === "pending";
@@ -1284,10 +1285,25 @@ function ApprovalCard({ request, index, opinion, onOpinionChange }: ApprovalCard
         </div>
 
         {!isPending && request.approverName && (
-          <div className="p-3 bg-ink-50 rounded-md">
-            <div className="flex items-center gap-2 text-xs text-ink-500 mb-1">
+          <div
+            className={`p-3 rounded-md ${
+              request.status === "approved" ? "bg-safe-50 border border-safe-200" : "bg-danger-50 border border-danger-200"
+            }`}
+          >
+            <div className="flex items-center gap-2 mb-2">
+              <span
+                className={`text-xs font-semibold px-2 py-0.5 rounded ${
+                  request.status === "approved"
+                    ? "badge-safe"
+                    : "badge-danger"
+                }`}
+              >
+                {request.status === "approved" ? "已通过" : "已驳回"}
+              </span>
+            </div>
+            <div className="flex items-center gap-2 text-xs text-ink-500 mb-1 flex-wrap">
               <span>
-                {request.status === "approved" ? "通过" : "驳回"}人：
+                审批人：
                 <span className="text-ink-700 font-medium">{request.approverName}</span>
               </span>
               <span className="text-ink-300">|</span>
@@ -1298,7 +1314,7 @@ function ApprovalCard({ request, index, opinion, onOpinionChange }: ApprovalCard
             </div>
             {request.approveRemark && (
               <div className="mt-1.5 text-sm text-ink-600 flex items-start gap-2">
-                <span className="text-ink-400 flex-shrink-0">意见：</span>
+                <span className="text-ink-400 flex-shrink-0">审批意见：</span>
                 <span>{request.approveRemark}</span>
               </div>
             )}
@@ -1314,17 +1330,17 @@ function ApprovalCard({ request, index, opinion, onOpinionChange }: ApprovalCard
             </label>
             <textarea
               className="input-base min-h-[72px] resize-none"
-              placeholder="请输入审批意见或备注说明..."
+              placeholder="请填写审批意见（选填）"
               value={opinion}
               onChange={(e) => onOpinionChange(e.target.value)}
             />
           </div>
           <div className="flex items-center justify-end gap-3">
-            <button className="btn-secondary">
+            <button className="btn-secondary" onClick={onReject}>
               <XCircle className="w-4 h-4 text-danger-500" />
               <span>驳回</span>
             </button>
-            <button className="btn-primary">
+            <button className="btn-primary" onClick={onApprove}>
               <CheckCircle2 className="w-4 h-4" />
               <span>通过</span>
             </button>
@@ -1381,23 +1397,77 @@ function ApprovalFlowNode({ title, subtitle, status }: ApprovalFlowNodeProps) {
   );
 }
 
+interface DepartedUserRow {
+  userId: string;
+  userName: string;
+  dept: string;
+  position: string;
+  roleIds: string[];
+  departDate: string;
+  riskLevel: RiskLevel;
+  recycled: boolean;
+  recycledAt?: string;
+  recycledBy?: string;
+}
+
 function OffboardingPanel() {
   const [statusTab, setStatusTab] = useState<OffboardStatusKey>("pending");
   const [searchText, setSearchText] = useState("");
   const [deptFilter, setDeptFilter] = useState("");
+  const [confirmModalOpen, setConfirmModalOpen] = useState(false);
+  const [selectedUser, setSelectedUser] = useState<DepartedUserRow | null>(null);
+  const [auditModalOpen, setAuditModalOpen] = useState(false);
+  const [auditTargetUser, setAuditTargetUser] = useState<DepartedUserRow | null>(null);
+
+  const departedUsers = useAppStore((s) => s.departedUsers);
+  const recycleDepartedUser = useAppStore((s) => s.recycleDepartedUser);
+  const auditLogs = useAppStore((s) => s.auditLogs);
 
   const filteredUsers = useMemo(() => {
-    return mockOffboardUsers.filter((u) => {
-      if (u.status !== statusTab) return false;
-      if (searchText && !u.name.toLowerCase().includes(searchText.toLowerCase())) return false;
-      if (deptFilter && u.departmentName !== deptFilter) return false;
+    return departedUsers.filter((u) => {
+      const isPending = !u.recycled;
+      if (statusTab === "pending" && !isPending) return false;
+      if (statusTab === "recycled" && isPending) return false;
+      if (searchText && !u.userName.toLowerCase().includes(searchText.toLowerCase())) return false;
+      if (deptFilter && u.dept !== deptFilter) return false;
       return true;
     });
-  }, [statusTab, searchText, deptFilter]);
+  }, [departedUsers, statusTab, searchText, deptFilter]);
 
-  const deptNames = Array.from(new Set(mockOffboardUsers.map((u) => u.departmentName)));
-  const pendingCount = mockOffboardUsers.filter((u) => u.status === "pending").length;
-  const recycledCount = mockOffboardUsers.filter((u) => u.status === "recycled").length;
+  const deptNames = Array.from(new Set(departedUsers.map((u) => u.dept)));
+  const pendingCount = departedUsers.filter((u) => !u.recycled).length;
+  const recycledCount = departedUsers.filter((u) => u.recycled).length;
+
+  const roleNameMap: Record<string, string> = {};
+  mockRoles.forEach((r) => (roleNameMap[r.id] = r.name));
+
+  const handleOpenRecycleConfirm = (user: DepartedUserRow) => {
+    setSelectedUser(user);
+    setConfirmModalOpen(true);
+  };
+
+  const handleConfirmRecycle = () => {
+    if (selectedUser) {
+      recycleDepartedUser(selectedUser.userId);
+      toast.success("离职权限已回收，用户账号已停用");
+    }
+    setConfirmModalOpen(false);
+    setSelectedUser(null);
+  };
+
+  const handleOpenAuditLog = (user: DepartedUserRow) => {
+    setAuditTargetUser(user);
+    setAuditModalOpen(true);
+  };
+
+  const userAuditLogs = useMemo(() => {
+    if (!auditTargetUser) return [];
+    return auditLogs.filter(
+      (log) =>
+        log.targetId === auditTargetUser.userId ||
+        log.targetName.includes(auditTargetUser.userName)
+    );
+  }, [auditLogs, auditTargetUser]);
 
   return (
     <div className="space-y-4">
@@ -1493,7 +1563,14 @@ function OffboardingPanel() {
           </thead>
           <tbody>
             {filteredUsers.map((u, idx) => (
-              <OffboardUserRow key={u.id} user={u} index={idx} />
+              <OffboardUserRow
+                key={u.userId}
+                user={u}
+                index={idx}
+                roleNameMap={roleNameMap}
+                onRecycle={() => handleOpenRecycleConfirm(u)}
+                onViewAudit={() => handleOpenAuditLog(u)}
+              />
             ))}
             {filteredUsers.length === 0 && (
               <tr>
@@ -1518,7 +1595,7 @@ function OffboardingPanel() {
             <div>
               <div className="text-xs text-safe-600">本月已回收</div>
               <div className="text-xl font-bold font-display text-safe-700 tabular-nums mt-0.5">
-                18 <span className="text-sm font-normal text-safe-600">人</span>
+                {recycledCount} <span className="text-sm font-normal text-safe-600">人</span>
               </div>
             </div>
           </div>
@@ -1546,19 +1623,150 @@ function OffboardingPanel() {
           </div>
         </div>
       </div>
+
+      <Modal
+        open={confirmModalOpen}
+        onClose={() => {
+          setConfirmModalOpen(false);
+          setSelectedUser(null);
+        }}
+        title="确认回收离职人员权限"
+        icon={<AlertTriangle className="w-5 h-5" />}
+        width="max-w-lg"
+        footer={
+          <>
+            <button
+              className="btn-secondary"
+              onClick={() => {
+                setConfirmModalOpen(false);
+                setSelectedUser(null);
+              }}
+            >
+              取消
+            </button>
+            <button className="btn-primary !bg-danger-600 !hover:bg-danger-700" onClick={handleConfirmRecycle}>
+              <LogOut className="w-4 h-4" />
+              <span>确认回收</span>
+            </button>
+          </>
+        }
+      >
+        {selectedUser && (
+          <div className="space-y-4">
+            <div className="space-y-2 p-4 rounded-lg bg-ink-50 border border-ink-200">
+              <div className="flex items-center gap-2 text-sm">
+                <span className="text-ink-500 w-20">姓名：</span>
+                <span className="font-semibold text-ink-800">{selectedUser.userName}</span>
+              </div>
+              <div className="flex items-center gap-2 text-sm">
+                <span className="text-ink-500 w-20">部门：</span>
+                <span className="text-ink-700">{selectedUser.dept}</span>
+              </div>
+              <div className="flex items-center gap-2 text-sm">
+                <span className="text-ink-500 w-20">岗位：</span>
+                <span className="text-ink-700">{selectedUser.position}</span>
+              </div>
+              <div className="flex items-center gap-2 text-sm">
+                <span className="text-ink-500 w-20">风险等级：</span>
+                <span className={riskBadgeMap[selectedUser.riskLevel]}>
+                  {riskLabelMap[selectedUser.riskLevel]}
+                </span>
+              </div>
+            </div>
+            <div className="p-4 rounded-lg bg-danger-50 border border-danger-200 flex items-start gap-3">
+              <AlertTriangle className="w-5 h-5 text-danger-600 flex-shrink-0 mt-0.5" />
+              <div className="text-sm text-danger-800 leading-relaxed">
+                <div className="font-semibold mb-1">⚠ 警告：此操作不可逆</div>
+                <p>回收将撤销该用户所有系统角色、强制下线所有在线会话、账号自动停用。请确认离职手续已完整办理并完成工作交接。</p>
+              </div>
+            </div>
+          </div>
+        )}
+      </Modal>
+
+      <Modal
+        open={auditModalOpen}
+        onClose={() => {
+          setAuditModalOpen(false);
+          setAuditTargetUser(null);
+        }}
+        title="操作记录"
+        icon={<FileText className="w-5 h-5" />}
+        width="max-w-2xl"
+        footer={
+          <button
+            className="btn-secondary"
+            onClick={() => {
+              setAuditModalOpen(false);
+              setAuditTargetUser(null);
+            }}
+          >
+            关闭
+          </button>
+        }
+      >
+        {auditTargetUser && (
+          <div className="space-y-3">
+            <div className="text-sm text-ink-500 mb-3">
+              操作人：<span className="font-semibold text-ink-700">{auditTargetUser.recycledBy || "-"}</span>
+              <span className="mx-2 text-ink-300">|</span>
+              回收时间：<span className="text-ink-700">{auditTargetUser.recycledAt || "-"}</span>
+            </div>
+            <div className="overflow-auto scrollbar-thin rounded-lg border border-ink-200 max-h-80">
+              <table className="min-w-full">
+                <thead className="bg-ink-50 sticky top-0">
+                  <tr>
+                    <th className="text-left px-4 py-2.5 text-xs font-semibold text-ink-600 uppercase tracking-wide">时间</th>
+                    <th className="text-left px-4 py-2.5 text-xs font-semibold text-ink-600 uppercase tracking-wide">模块</th>
+                    <th className="text-left px-4 py-2.5 text-xs font-semibold text-ink-600 uppercase tracking-wide">操作</th>
+                    <th className="text-left px-4 py-2.5 text-xs font-semibold text-ink-600 uppercase tracking-wide">操作人</th>
+                    <th className="text-left px-4 py-2.5 text-xs font-semibold text-ink-600 uppercase tracking-wide">结果</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-ink-100">
+                  {userAuditLogs.length > 0 ? (
+                    userAuditLogs.map((log) => (
+                      <tr key={log.id} className="hover:bg-ink-50">
+                        <td className="px-4 py-3 text-xs text-ink-500 whitespace-nowrap">{log.operateAt}</td>
+                        <td className="px-4 py-3 text-xs text-ink-600">{log.module}</td>
+                        <td className="px-4 py-3 text-xs font-medium text-ink-800">{log.action}</td>
+                        <td className="px-4 py-3 text-xs text-ink-600">{log.operatorName}</td>
+                        <td className="px-4 py-3 text-xs text-ink-600 max-w-xs truncate" title={log.afterValue}>
+                          {log.afterValue || "-"}
+                        </td>
+                      </tr>
+                    ))
+                  ) : (
+                    <tr>
+                      <td colSpan={5} className="px-4 py-8 text-center text-xs text-ink-400">
+                        暂无操作记录
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+      </Modal>
     </div>
   );
 }
 
 interface OffboardUserRowProps {
-  user: OffboardUser;
+  user: DepartedUserRow;
   index: number;
+  roleNameMap: Record<string, string>;
+  onRecycle: () => void;
+  onViewAudit: () => void;
 }
 
-function OffboardUserRow({ user, index }: OffboardUserRowProps) {
-  const initial = user.name.charAt(0);
+function OffboardUserRow({ user, index, roleNameMap, onRecycle, onViewAudit }: OffboardUserRowProps) {
+  const initial = user.userName.charAt(0);
   const avatarCls = avatarColors[index % avatarColors.length];
-  const isPending = user.status === "pending";
+  const isPending = !user.recycled;
+
+  const roleNames = user.roleIds.map((rid) => roleNameMap[rid] || rid);
 
   return (
     <tr
@@ -1574,9 +1782,9 @@ function OffboardUserRow({ user, index }: OffboardUserRowProps) {
             {initial}
           </div>
           <div className="min-w-0">
-            <div className="text-sm font-medium text-ink-800">{user.name}</div>
+            <div className="text-sm font-medium text-ink-800">{user.userName}</div>
             <div className="text-xs text-ink-500 truncate">
-              {user.departmentName} · {user.positionName}
+              {user.dept} · {user.position}
             </div>
           </div>
         </div>
@@ -1584,12 +1792,12 @@ function OffboardUserRow({ user, index }: OffboardUserRowProps) {
       <td className="table-td">
         <div className="flex items-center gap-1.5 text-sm text-ink-600 whitespace-nowrap">
           <Calendar className="w-3.5 h-3.5 text-ink-400" />
-          {user.leaveDate}
+          {user.departDate}
         </div>
       </td>
       <td className="table-td">
         <div className="flex flex-wrap gap-1">
-          {user.permissions.map((p) => (
+          {roleNames.map((p) => (
             <span
               key={p}
               className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium bg-ink-100 text-ink-600"
@@ -1617,6 +1825,11 @@ function OffboardUserRow({ user, index }: OffboardUserRowProps) {
                 {user.recycledAt.slice(5, 16)}
               </div>
             )}
+            {user.recycledBy && (
+              <div className="mt-0.5 text-[11px] text-ink-400">
+                回收人：{user.recycledBy}
+              </div>
+            )}
           </div>
         )}
       </td>
@@ -1627,6 +1840,7 @@ function OffboardUserRow({ user, index }: OffboardUserRowProps) {
               <button
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium text-warn-700 bg-warn-50 hover:bg-warn-100 ring-1 ring-inset ring-warn-500/30 transition-colors"
                 title="立即回收权限并强制下线"
+                onClick={onRecycle}
               >
                 <LogOut className="w-3.5 h-3.5" />
                 <span>回收权限</span>
@@ -1641,6 +1855,7 @@ function OffboardUserRow({ user, index }: OffboardUserRowProps) {
           ) : (
             <button
               className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-md text-xs font-medium text-brand-600 hover:bg-brand-50 transition-colors"
+              onClick={onViewAudit}
             >
               <FileText className="w-3.5 h-3.5" />
               <span>操作记录</span>

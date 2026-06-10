@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import Sidebar from "./Sidebar";
 import Header from "./Header";
+import { ToastContainer } from "@/components/ui/Modal";
 
 interface AppLayoutProps {
   children: ReactNode;
@@ -16,6 +17,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
           {children}
         </main>
       </div>
+      <ToastContainer />
     </div>
   );
 }
