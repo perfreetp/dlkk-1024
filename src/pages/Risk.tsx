@@ -501,7 +501,7 @@ function HealthGauge({ value }: { value: number }) {
   );
 }
 
-type AccountStatus = "frozen" | "pending" | "recovered";
+type AccountStatus = "frozen" | "pending" | "recovered" | "offline";
 
 interface RiskAccount {
   id: string;
@@ -519,12 +519,14 @@ const accountStatusBadgeMap: Record<AccountStatus, string> = {
   frozen: "badge-danger",
   pending: "badge-warn animate-pulse-soft",
   recovered: "badge-safe",
+  offline: "badge-info",
 };
 
 const accountStatusLabelMap: Record<AccountStatus, string> = {
   frozen: "冻结中",
   pending: "待处置",
   recovered: "已恢复",
+  offline: "已下线",
 };
 
 function AccountsTab() {
@@ -536,7 +538,9 @@ function AccountsTab() {
   const updateUserStatus = useAppStore((s) => s.updateUserStatus);
   const batchLogoutSessions = useAppStore((s) => s.batchLogoutSessions);
 
-  const [statusTab, setStatusTab] = useState<"frozen" | "pending" | "recovered" | "all">("all");
+  const [statusTab, setStatusTab] = useState<
+    "frozen" | "pending" | "recovered" | "offline" | "all"
+  >("all");
   const [levelFilter, setLevelFilter] = useState<RiskLevel | "all">("all");
   const [searchText, setSearchText] = useState("");
   const [typeFilter, setTypeFilter] = useState<RiskType | "all">("all");
@@ -575,6 +579,11 @@ function AccountsTab() {
       let status: AccountStatus;
       if (user.status === "frozen") status = "frozen";
       else if (evts.some((e) => e.status === "pending")) status = "pending";
+      else if (
+        evts.every((e) => e.status === "resolved") &&
+        evts.some((e) => e.handleAction === "logout")
+      )
+        status = "offline";
       else status = "recovered";
       list.push({
         id: uid,
@@ -780,14 +789,22 @@ function AccountsTab() {
       <section className="card-base p-4 animate-fade-in-up">
         <div className="flex flex-col gap-4">
           <div className="flex flex-wrap items-center gap-1">
-            {(["frozen", "pending", "recovered", "all"] as const).map((s) => {
+            {(["frozen", "pending", "offline", "recovered", "all"] as const).map((s) => {
               const count =
                 s === "all"
                   ? accounts.length
                   : accounts.filter((a) => a.status === s).length;
               const isActive = statusTab === s;
               const label =
-                s === "frozen" ? "冻结中" : s === "pending" ? "待处置" : s === "recovered" ? "已恢复" : "全部";
+                s === "frozen"
+                  ? "冻结中"
+                  : s === "pending"
+                  ? "待处置"
+                  : s === "offline"
+                  ? "已下线"
+                  : s === "recovered"
+                  ? "已恢复"
+                  : "全部";
               return (
                 <button
                   key={s}

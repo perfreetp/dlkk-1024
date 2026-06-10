@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { persist } from "zustand/middleware";
 import {
   User,
   Application,
@@ -108,7 +109,9 @@ interface AppState {
   toggleAppStatus: (appId: string) => void;
 }
 
-export const useAppStore = create<AppState>((set, get) => ({
+export const useAppStore = create<AppState>()(
+  persist(
+    (set, get) => ({
   users: [...mockUsers],
   applications: [...mockApplications],
   permissionRequests: [...mockPermissionRequests],
@@ -217,14 +220,15 @@ export const useAppStore = create<AppState>((set, get) => ({
       username: data.username || `user_${Math.random().toString(36).slice(2, 6)}`,
       name: data.name,
       email: data.email || `${data.username || "new"}@group.com`,
-      phone: data.phone || "13800000000",
-      departmentId: data.departmentId || "d001",
+      phone: data.phone,
+      avatar: data.avatar,
+      departmentId: data.departmentId || "dept-001",
       departmentName: data.departmentName || "技术研发中心",
       positionId: data.positionId || "p002",
       positionName: data.positionName || "高级开发工程师",
       roleIds: data.roleIds || ["r004"],
       status: "active",
-      mfaEnabled: false,
+      mfaEnabled: !!data.mfaEnabled,
       createdAt: now(),
       createdBy: CURRENT_ADMIN.id,
     };
@@ -453,9 +457,9 @@ export const useAppStore = create<AppState>((set, get) => ({
       module: "风险处置",
       action: `处置风险-${actionLabel[action]}`,
       targetId: eventId,
-      targetName: `${ev.type} / ${ev.userName}`,
-      beforeValue: "待处置",
-      afterValue: `已处置${remark ? `，备注：${remark}` : ""}`,
+      targetName: `${ev.userName} / ${ev.userDept}`,
+      beforeValue: `风险类型:${ev.type} | 等级:${ev.level}`,
+      afterValue: `处置动作:${actionLabel[action]}${remark ? `，备注：${remark}` : ""}`,
     });
   },
 
@@ -512,4 +516,14 @@ export const useAppStore = create<AppState>((set, get) => ({
       afterValue: next,
     });
   },
-}));
+    }),
+    {
+      name: "iam-console-store",
+      version: 1,
+      merge: (persistedState: any, currentState: AppState) => ({
+        ...currentState,
+        ...(persistedState || {}),
+      }),
+    }
+  )
+);
