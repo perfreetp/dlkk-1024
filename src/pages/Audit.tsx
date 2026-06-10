@@ -1,4 +1,5 @@
 import { useState, useMemo } from "react";
+import { useNavigate } from "react-router-dom";
 import { useAppStore } from "@/stores/useAppStore";
 import { Modal, toast } from "@/components/ui/Modal";
 import {
@@ -373,6 +374,13 @@ function LoginLogsTab() {
 }
 
 function LoginLogsTable({ logs }: { logs: LoginLog[] }) {
+  const navigate = useNavigate();
+
+  const handleInitiateRisk = (log: LoginLog) => {
+    toast.info(`已从登录日志发起风险处置：用户 ${log.userName}，IP ${log.ip}`);
+    navigate("/risk");
+  };
+
   return (
     <section className="card-base overflow-auto scrollbar-thin animate-fade-in-up stagger-3">
       <table className="min-w-full">
@@ -384,7 +392,7 @@ function LoginLogsTable({ logs }: { logs: LoginLog[] }) {
             <th className="table-th w-44">IP / 地点</th>
             <th className="table-th w-48">设备</th>
             <th className="table-th w-24">状态</th>
-            <th className="table-th w-24 text-right">操作</th>
+            <th className="table-th w-36 text-right">操作</th>
           </tr>
         </thead>
         <tbody>
@@ -457,12 +465,24 @@ function LoginLogsTable({ logs }: { logs: LoginLog[] }) {
                   )}
                 </td>
                 <td className="table-td text-right">
-                  <button
-                    className="inline-flex items-center justify-center w-8 h-8 rounded-md text-ink-500 hover:bg-ink-100 hover:text-ink-700 transition-colors"
-                    title="详情"
-                  >
-                    <Eye className="w-4 h-4" />
-                  </button>
+                  <div className="flex items-center justify-end gap-1">
+                    <button
+                      className="inline-flex items-center justify-center w-8 h-8 rounded-md text-ink-500 hover:bg-ink-100 hover:text-ink-700 transition-colors"
+                      title="详情"
+                    >
+                      <Eye className="w-4 h-4" />
+                    </button>
+                    {isFail && (
+                      <button
+                        onClick={() => handleInitiateRisk(log)}
+                        className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium text-danger-600 hover:bg-danger-50 border border-danger-200 transition-colors"
+                        title="发起风险处置"
+                      >
+                        <ShieldAlert className="w-3 h-3" />
+                        <span>风险处置</span>
+                      </button>
+                    )}
+                  </div>
                 </td>
               </tr>
             );
@@ -484,6 +504,13 @@ function LoginLogsTable({ logs }: { logs: LoginLog[] }) {
 }
 
 function LoginLogsTimeline({ logs }: { logs: LoginLog[] }) {
+  const navigate = useNavigate();
+
+  const handleInitiateRisk = (log: LoginLog) => {
+    toast.info(`已从登录日志发起风险处置：用户 ${log.userName}，IP ${log.ip}`);
+    navigate("/risk");
+  };
+
   return (
     <section className="card-base p-6 animate-fade-in-up stagger-3">
       <ol className="relative border-l-2 border-ink-200 ml-3 space-y-6">
@@ -546,12 +573,24 @@ function LoginLogsTimeline({ logs }: { logs: LoginLog[] }) {
                         </div>
                       )}
                     </div>
-                    <button
-                      className="inline-flex items-center justify-center w-8 h-8 rounded-md text-ink-500 hover:bg-ink-100 hover:text-ink-700 transition-colors shrink-0"
-                      title="详情"
-                    >
-                      <Eye className="w-4 h-4" />
-                    </button>
+                    <div className="flex items-center gap-1 shrink-0">
+                      <button
+                        className="inline-flex items-center justify-center w-8 h-8 rounded-md text-ink-500 hover:bg-ink-100 hover:text-ink-700 transition-colors"
+                        title="详情"
+                      >
+                        <Eye className="w-4 h-4" />
+                      </button>
+                      {isFail && (
+                        <button
+                          onClick={() => handleInitiateRisk(log)}
+                          className="inline-flex items-center gap-1 px-2 py-1.5 rounded-md text-xs font-medium text-danger-600 hover:bg-danger-50 border border-danger-200 transition-colors"
+                          title="发起风险处置"
+                        >
+                          <ShieldAlert className="w-3 h-3" />
+                          <span>风险处置</span>
+                        </button>
+                      )}
+                    </div>
                   </div>
                 </div>
               </div>

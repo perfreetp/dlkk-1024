@@ -23,6 +23,11 @@ import {
   ChevronRight,
   ChevronUp,
   AlertTriangle,
+  TestTube,
+  CheckCircle2,
+  XCircle,
+  Clock,
+  Play,
 } from "lucide-react";
 import {
   ResponsiveContainer,
@@ -36,7 +41,7 @@ import {
   LabelList,
 } from "recharts";
 import { mockAppUsageStats } from "@/mock";
-import type { Application, AppProtocol, AppStatus, AuditLog } from "@/types";
+import type { Application, AppProtocol, AppStatus, AuditLog, LastTestResult } from "@/types";
 import { cn } from "@/lib/utils";
 import { useAppStore } from "@/stores/useAppStore";
 import { Drawer, Modal, toast } from "@/components/ui/Modal";
@@ -97,6 +102,7 @@ const DRAWER_TABS = [
   { key: "protocol", label: "协议配置", icon: KeyRound },
   { key: "policy", label: "访问策略", icon: ShieldCheck },
   { key: "stats", label: "使用统计", icon: Activity },
+  { key: "test", label: "SSO测试", icon: TestTube },
 ] as const;
 
 type DrawerTabKey = (typeof DRAWER_TABS)[number]["key"];
@@ -701,6 +707,8 @@ export default function Applications() {
             onRegenerateClientId={handleRegenerateClientId}
             onRegenerateSecret={handleRegenerateSecret}
             usageStats={mockAppUsageStats.find((s) => s.appId === currentApp.id)}
+            updateApplication={updateApplication}
+            addAuditLog={addAuditLog}
           />
         )}
 
@@ -1048,6 +1056,8 @@ interface AppDetailContentProps {
     uniqueUsers: number;
     failCount: number;
   };
+  updateApplication: (appId: string, patch: Partial<Application>) => void;
+  addAuditLog: (log: Partial<AuditLog>) => void;
 }
 
 function AppDetailContent({
@@ -1059,6 +1069,8 @@ function AppDetailContent({
   onRegenerateClientId,
   onRegenerateSecret,
   usageStats,
+  updateApplication,
+  addAuditLog,
 }: AppDetailContentProps) {
   const [showSecret, setShowSecret] = useState(false);
   const [copiedField, setCopiedField] = useState<string | null>(null);
@@ -1144,6 +1156,13 @@ function AppDetailContent({
         )}
         {activeTab === "stats" && (
           <StatsTab app={app} usageStats={usageStats} failRate={failRate} />
+        )}
+        {activeTab === "test" && (
+          <SsoTestTab
+            app={app}
+            updateApplication={updateApplication}
+            addAuditLog={addAuditLog}
+          />
         )}
       </div>
     </div>
@@ -1593,6 +1612,250 @@ function StatsTab({ app, usageStats, failRate }: StatsTabProps) {
             />
           </BarChart>
         </ResponsiveContainer>
+      </div>
+    </div>
+  );
+}
+
+interface SsoTestTabProps {
+  app: Application;
+  updateApplication: (appId: string, patch: Partial<Application>) => void;
+  addAuditLog: (log: Partial<AuditLog>) => void;
+}
+
+const FAILURE_REASONS = [
+  "ClientID 或 ClientSecret 不匹配",
+  "回调 URL 未在白名单中",
+  "签名验证失败，请检查证书配置",
+  "响应超时，应用服务不可达",
+  "用户信息端点返回非 200 状态码",
+  "Token 签名算法不一致",
+  "SAML Assertion 过期或无效",
+  "IP 地址不在白名单范围内",
+];
+
+const nowDateTime = () => {
+  const d = new Date();
+  const pad = (n: number) => n.toString().padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(
+    d.getHours()
+  )}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+};
+
+function SsoTestTab({ app, updateApplication, addAuditLog }: SsoTestTabProps) {
+  const [isTesting, setIsTesting] = useState(false);
+  const [localResult, setLocalResult] = useState<LastTestResult | undefined>(app.lastTest);
+
+  useEffect(() => {
+    setLocalResult(app.lastTest);
+  }, [app.lastTest, app.id]);
+
+  const handleRunTest = async () => {
+    if (isTesting) return;
+    setIsTesting(true);
+
+    const startTime = Date.now();
+    await new Promise((resolve) => setTimeout(resolve, 1200 + Math.random() * 800));
+    const duration = Date.now() - startTime;
+
+    const success = Math.random() >= 0.5;
+    const reason = success
+      ? undefined
+      : FAILURE_REASONS[Math.floor(Math.random() * FAILURE_REASONS.length)];
+
+    const result: LastTestResult = {
+      success,
+      reason,
+      testedAt: nowDateTime(),
+      duration,
+    };
+
+    setLocalResult(result);
+    updateApplication(app.id, { lastTest: result });
+    addAuditLog({
+      module: "应用接入",
+      action: "SSO连通性测试",
+      targetId: app.id,
+      targetName: app.name,
+      beforeValue: "-",
+      afterValue: success ? "测试通过" : `测试失败: ${reason}`,
+    });
+
+    if (success) {
+      toast.success("SSO 测试通过！");
+    } else {
+      toast.error(`SSO 测试失败：${reason}`);
+    }
+
+    setIsTesting(false);
+  };
+
+  return (
+    <div className="space-y-5">
+      <SectionTitle
+        title="连通性测试"
+        desc="模拟发起一次完整的 SSO 登录流程，验证协议配置是否正确"
+      />
+
+      <div className="p-5 rounded-lg bg-gradient-to-br from-ink-50 to-ink-100 border border-ink-200">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-5">
+          <div>
+            <div className="text-sm font-semibold text-ink-800">
+              {app.protocol} 协议测试
+            </div>
+            <div className="text-xs text-ink-500 mt-1">
+              测试端点：认证请求 → 身份验证 → Token/Assertion 校验 → 用户信息拉取
+            </div>
+          </div>
+          <button
+            onClick={handleRunTest}
+            disabled={isTesting || app.status === "disabled"}
+            className={cn(
+              "flex items-center justify-center gap-2 px-5 py-2.5 rounded-md text-sm font-semibold transition-all duration-200",
+              isTesting || app.status === "disabled"
+                ? "bg-ink-200 text-ink-400 cursor-not-allowed"
+                : "bg-gradient-to-r from-brand-600 to-brand-700 text-white shadow-sm hover:shadow-md hover:-translate-y-0.5 active:translate-y-0"
+            )}
+          >
+            {isTesting ? (
+              <>
+                <RefreshCw className="w-4 h-4 animate-spin" />
+                <span>测试中...</span>
+              </>
+            ) : (
+              <>
+                <Play className="w-4 h-4" />
+                <span>开始测试</span>
+              </>
+            )}
+          </button>
+        </div>
+
+        {app.status === "disabled" && (
+          <div className="mb-4 p-3 rounded-md bg-amber-50 border border-amber-200 text-xs text-amber-700 flex items-start gap-2">
+            <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+            <span>应用当前已停用，请先在「基础配置」中启用后再进行测试</span>
+          </div>
+        )}
+
+        <div className="grid grid-cols-4 gap-3">
+          <div className="p-3 rounded-md bg-white border border-ink-200">
+            <div className="text-[11px] text-ink-400 mb-1">测试步骤</div>
+            <div className="text-sm font-bold text-ink-700 tabular-nums">4</div>
+          </div>
+          <div className="p-3 rounded-md bg-white border border-ink-200">
+            <div className="text-[11px] text-ink-400 mb-1">协议类型</div>
+            <div className="text-sm font-bold text-ink-700">{app.protocol}</div>
+          </div>
+          <div className="p-3 rounded-md bg-white border border-ink-200">
+            <div className="text-[11px] text-ink-400 mb-1">回调地址</div>
+            <div className="text-sm font-bold text-ink-700 tabular-nums">
+              {app.callbackUrls.length}
+            </div>
+          </div>
+          <div className="p-3 rounded-md bg-white border border-ink-200">
+            <div className="text-[11px] text-ink-400 mb-1">MFA</div>
+            <div className="text-sm font-bold text-ink-700">
+              {app.mfaRequired ? "开启" : "关闭"}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <SectionTitle title="测试结果" desc="最近一次 SSO 连通性测试的详细信息" />
+
+      {!localResult ? (
+        <div className="p-8 rounded-lg border-2 border-dashed border-ink-200 bg-ink-50/50 text-center">
+          <TestTube className="w-10 h-10 text-ink-300 mx-auto mb-3" />
+          <div className="text-sm font-medium text-ink-500">尚未进行测试</div>
+          <div className="text-xs text-ink-400 mt-1">
+            点击上方「开始测试」按钮验证 SSO 配置
+          </div>
+        </div>
+      ) : (
+        <div
+          className={cn(
+            "p-5 rounded-lg border-2",
+            localResult.success
+              ? "bg-safe-50/50 border-safe-200"
+              : "bg-danger-50/50 border-danger-200"
+          )}
+        >
+          <div className="flex items-start gap-3 mb-4">
+            {localResult.success ? (
+              <CheckCircle2 className="w-6 h-6 text-safe-600 shrink-0" />
+            ) : (
+              <XCircle className="w-6 h-6 text-danger-600 shrink-0" />
+            )}
+            <div className="flex-1 min-w-0">
+              <div
+                className={cn(
+                  "text-base font-bold",
+                  localResult.success ? "text-safe-800" : "text-danger-800"
+                )}
+              >
+                {localResult.success ? "测试通过 ✓" : "测试失败 ✗"}
+              </div>
+              <div
+                className={cn(
+                  "text-xs mt-0.5",
+                  localResult.success ? "text-safe-600" : "text-danger-600"
+                )}
+              >
+                {localResult.success
+                  ? `${app.protocol} 协议配置正确，SSO 登录流程可正常完成`
+                  : localResult.reason}
+              </div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-4 border-t border-ink-200/60">
+            <div className="flex items-center gap-2 text-xs text-ink-600">
+              <Clock className="w-3.5 h-3.5 text-ink-400 shrink-0" />
+              <span className="text-ink-400 shrink-0">测试时间：</span>
+              <span className="font-mono font-medium text-ink-700">
+                {localResult.testedAt}
+              </span>
+            </div>
+            <div className="flex items-center gap-2 text-xs text-ink-600">
+              <Activity className="w-3.5 h-3.5 text-ink-400 shrink-0" />
+              <span className="text-ink-400 shrink-0">耗时：</span>
+              <span className="font-mono font-medium text-ink-700 tabular-nums">
+                {localResult.duration} ms
+              </span>
+            </div>
+          </div>
+
+          {!localResult.success && localResult.reason && (
+            <div className="mt-4 p-3 rounded-md bg-white/60 border border-danger-200/60">
+              <div className="text-[11px] font-semibold text-danger-700 mb-1.5">
+                排查建议
+              </div>
+              <ul className="space-y-1 text-[11px] text-ink-600">
+                <li>• 请检查「协议配置」中的 ClientID / ClientSecret 是否与应用侧一致</li>
+                <li>• 确认回调地址已正确添加到应用的白名单中</li>
+                <li>• SAML 协议请验证证书文件和签名算法是否匹配</li>
+                <li>• 检查「访问策略」中的 IP 白名单和时段限制是否影响测试</li>
+              </ul>
+            </div>
+          )}
+        </div>
+      )}
+
+      <div className="p-4 rounded-md bg-brand-50/50 border border-brand-200/60">
+        <div className="flex items-start gap-2">
+          <BookOpen className="w-4 h-4 text-brand-600 shrink-0 mt-0.5" />
+          <div>
+            <div className="text-xs font-semibold text-brand-800 mb-1">
+              测试说明
+            </div>
+            <ul className="space-y-1 text-[11px] text-brand-700/80 leading-relaxed">
+              <li>• 本测试为模拟演练，不会创建真实会话或写入登录日志</li>
+              <li>• 测试结果仅反映协议层面的连通性，不代表真实用户体验</li>
+              <li>• 建议每次修改协议配置后重新执行测试</li>
+            </ul>
+          </div>
+        </div>
       </div>
     </div>
   );

@@ -1,4 +1,5 @@
 import { useState, useMemo } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   AlertTriangle,
   ShieldCheck,
@@ -32,6 +33,7 @@ import {
   Calendar,
   User,
   ArrowRight,
+  History,
 } from "lucide-react";
 import {
   ResponsiveContainer,
@@ -48,7 +50,7 @@ import {
 } from "recharts";
 import { useAppStore } from "@/stores/useAppStore";
 import { Modal, toast } from "@/components/ui/Modal";
-import { mockRiskRules } from "@/mock";
+import { mockRiskRules, mockLoginLogs } from "@/mock";
 import type { RiskLevel, RiskType, RiskStatus, HandleAction } from "@/types";
 
 type TabKey = "overview" | "accounts" | "rules" | "records";
@@ -537,6 +539,8 @@ function AccountsTab() {
   const freezeUserFromRisk = useAppStore((s) => s.freezeUserFromRisk);
   const updateUserStatus = useAppStore((s) => s.updateUserStatus);
   const batchLogoutSessions = useAppStore((s) => s.batchLogoutSessions);
+  const addAuditLog = useAppStore((s) => s.addAuditLog);
+  const store = useAppStore;
 
   const [statusTab, setStatusTab] = useState<
     "frozen" | "pending" | "recovered" | "offline" | "all"
@@ -668,6 +672,40 @@ function AccountsTab() {
     const evIds = getPendingEventIds(account.id);
     if (evIds.length > 0) {
       batchHandleRiskEvents(evIds, "logout", "风险页面强制下线处置");
+    } else {
+      addAuditLog({
+        module: "风险处置",
+        action: "强制下线",
+        targetId: account.id,
+        targetName: `${account.name} / ${account.dept}`,
+        beforeValue: `账号状态:${accountStatusLabelMap[account.status]} | 在线会话:${userSessionIds.length}`,
+        afterValue: `处置动作:强制下线，备注：风险页面强制下线处置`,
+      });
+      const now = () => {
+        const d = new Date();
+        const pad = (n: number) => n.toString().padStart(2, "0");
+        return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+      };
+      const genId = (prefix: string) =>
+        `${prefix}${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+      const syntheticEvent = {
+        id: genId("re"),
+        type: account.reason,
+        level: account.level,
+        userId: account.id,
+        userName: account.name,
+        userDept: account.dept,
+        ip: "-",
+        description: "风险处置：强制下线操作（合成记录）",
+        detectedAt: now(),
+        status: "resolved" as const,
+        handlerId: "u001",
+        handlerName: "张三",
+        handleAt: now(),
+        handleRemark: "风险页面强制下线处置",
+        handleAction: "logout" as const,
+      };
+      store.setState((s) => ({ riskEvents: [syntheticEvent, ...s.riskEvents] }));
     }
     toast.success("用户所有在线会话已下线");
     setLogoutModal(null);
@@ -724,6 +762,50 @@ function AccountsTab() {
     ids.forEach((uid) => allEventIds.push(...getPendingEventIds(uid)));
     if (allEventIds.length > 0) {
       batchHandleRiskEvents(allEventIds, "logout", "批量强制下线处置");
+    }
+    const now = () => {
+      const d = new Date();
+      const pad = (n: number) => n.toString().padStart(2, "0");
+      return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+    };
+    const genId = (prefix: string) =>
+      `${prefix}${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+    const syntheticEvents: typeof riskEvents = [];
+    ids.forEach((uid) => {
+      const userPendingIds = getPendingEventIds(uid);
+      if (userPendingIds.length === 0) {
+        const acc = accounts.find((a) => a.id === uid);
+        if (!acc) return;
+        const sessionCount = sessions.filter((s) => s.userId === uid && s.isOnline).length;
+        addAuditLog({
+          module: "风险处置",
+          action: "强制下线",
+          targetId: uid,
+          targetName: `${acc.name} / ${acc.dept}`,
+          beforeValue: `账号状态:${accountStatusLabelMap[acc.status]} | 在线会话:${sessionCount}`,
+          afterValue: `处置动作:强制下线，备注：批量强制下线处置`,
+        });
+        syntheticEvents.push({
+          id: genId("re"),
+          type: acc.reason,
+          level: acc.level,
+          userId: uid,
+          userName: acc.name,
+          userDept: acc.dept,
+          ip: "-",
+          description: "风险处置：批量强制下线操作（合成记录）",
+          detectedAt: now(),
+          status: "resolved",
+          handlerId: "u001",
+          handlerName: "张三",
+          handleAt: now(),
+          handleRemark: "批量强制下线处置",
+          handleAction: "logout",
+        });
+      }
+    });
+    if (syntheticEvents.length > 0) {
+      store.setState((s) => ({ riskEvents: [...syntheticEvents, ...s.riskEvents] }));
     }
     toast.success(`已对 ${ids.length} 个账号执行强制下线`);
     setBatchLogoutOpen(false);
@@ -1224,7 +1306,13 @@ function AccountDetailDrawer({ account, onClose }: { account: RiskAccount; onClo
   const users = useAppStore((s) => s.users);
   const riskEvents = useAppStore((s) => s.riskEvents);
   const auditLogs = useAppStore((s) => s.auditLogs);
+  const sessions = useAppStore((s) => s.sessions);
+  const logoutSession = useAppStore((s) => s.logoutSession);
+  const handleRiskEvent = useAppStore((s) => s.handleRiskEvent);
   const [detailTab, setDetailTab] = useState<"basic" | "login" | "risk" | "history">("basic");
+  const [logoutSingleModal, setLogoutSingleModal] = useState<{ sessionId: string; appName: string } | null>(null);
+  const [handleSingleModal, setHandleSingleModal] = useState<{ eventId: string; action: HandleAction; actionLabel: string } | null>(null);
+  const [singleRemark, setSingleRemark] = useState("");
 
   const latestUser = users.find((u) => u.id === account.id);
   const currentStatus: AccountStatus = latestUser?.status === "frozen" ? "frozen" : account.status;
@@ -1234,12 +1322,84 @@ function AccountDetailDrawer({ account, onClose }: { account: RiskAccount; onClo
     [riskEvents, account.id]
   );
 
+  const userSessions = useMemo(
+    () => sessions.filter((s) => s.userId === account.id),
+    [sessions, account.id]
+  );
+
+  const userLoginLogs = useMemo(() => {
+    const logs = mockLoginLogs.filter((l) => l.userId === account.id);
+    const eventLogs = userRiskEvents.map((e) => ({
+      id: `ev-${e.id}`,
+      userId: e.userId,
+      userName: e.userName,
+      appId: "",
+      appName: "风险检测系统",
+      ip: e.ip,
+      location: "未知·风险IP",
+      deviceType: "desktop" as const,
+      os: "未知系统",
+      browser: "未知浏览器",
+      deviceFingerprint: "",
+      status: "fail" as const,
+      failReason: e.type + " - " + e.description,
+      loginAt: e.detectedAt,
+      sessionId: undefined,
+    }));
+    return [...logs, ...eventLogs].sort((a, b) => b.loginAt.localeCompare(a.loginAt));
+  }, [account.id, userRiskEvents]);
+
   const userHistory = useMemo(() => {
-    return auditLogs
+    const auditHistory = auditLogs
       .filter((l) => l.module === "风险处置" && (l.targetId === account.id || l.targetName.includes(account.name)))
-      .slice()
-      .reverse();
-  }, [auditLogs, account.id, account.name]);
+      .map((l) => ({
+        id: l.id,
+        time: l.operateAt,
+        action: l.action,
+        operatorName: l.operatorName,
+        detail: l.afterValue || l.beforeValue || "无详细备注",
+        source: "audit" as const,
+      }));
+    const riskHistory = userRiskEvents
+      .filter((e) => e.status !== "pending" && e.handleAt)
+      .map((e) => {
+        const actionLabel = { freeze: "冻结账号", logout: "强制下线", release: "标记放行" } as const;
+        return {
+          id: `rh-${e.id}`,
+          time: e.handleAt!,
+          action: `处置风险-${actionLabel[e.handleAction!]}`,
+          operatorName: e.handlerName || "系统",
+          detail: `风险类型:${e.type} | 等级:${levelLabelMap[e.level]}${e.handleRemark ? `，备注：${e.handleRemark}` : ""}`,
+          source: "risk" as const,
+        };
+      });
+    const loginAudit = auditLogs
+      .filter((l) => l.module === "登录审计" && l.targetName.includes(account.name))
+      .map((l) => ({
+        id: l.id,
+        time: l.operateAt,
+        action: l.action,
+        operatorName: l.operatorName,
+        detail: l.afterValue || l.beforeValue || "无详细备注",
+        source: "audit" as const,
+      }));
+    return [...auditHistory, ...riskHistory, ...loginAudit].sort((a, b) => b.time.localeCompare(a.time));
+  }, [auditLogs, account.id, account.name, userRiskEvents]);
+
+  const handleLogoutSingle = () => {
+    if (!logoutSingleModal) return;
+    logoutSession(logoutSingleModal.sessionId);
+    toast.success(`已下线 ${logoutSingleModal.appName} 会话`);
+    setLogoutSingleModal(null);
+  };
+
+  const handleSingleEvent = () => {
+    if (!handleSingleModal) return;
+    handleRiskEvent(handleSingleModal.eventId, handleSingleModal.action, singleRemark || `${handleSingleModal.actionLabel}处置`);
+    toast.success(`已${handleSingleModal.actionLabel}`);
+    setHandleSingleModal(null);
+    setSingleRemark("");
+  };
 
   return (
     <div className="fixed inset-0 z-50 overflow-hidden">
@@ -1315,35 +1475,134 @@ function AccountDetailDrawer({ account, onClose }: { account: RiskAccount; onClo
           )}
 
           {detailTab === "login" && (
-            <div className="space-y-4 animate-fade-in-up">
-              <div className="h-40 rounded-md bg-gradient-to-br from-brand-50 to-safe-50 border border-ink-200 flex items-center justify-center">
-                <div className="text-center">
-                  <MapPin className="w-10 h-10 text-brand-500 mx-auto mb-2" />
-                  <p className="text-sm text-ink-600">登录地理分布（迷你地图占位）</p>
-                  <p className="text-xs text-ink-400 mt-1">北京 · 上海 · 广州（异常）</p>
-                </div>
-              </div>
-              <div className="space-y-2">
-                <h4 className="text-sm font-semibold text-ink-800">最近登录记录（基于风险事件）</h4>
-                {userRiskEvents.length === 0 ? (
-                  <p className="text-sm text-ink-400 py-6 text-center">暂无登录记录</p>
+            <div className="space-y-5 animate-fade-in-up">
+              <div>
+                <h4 className="text-sm font-semibold text-ink-800 mb-3 flex items-center gap-2">
+                  <Monitor className="w-4 h-4 text-brand-600" />
+                  在线会话
+                  <span className="badge-info tabular-nums">{userSessions.filter((s) => s.isOnline).length} 个活跃</span>
+                </h4>
+                {userSessions.length === 0 ? (
+                  <div className="p-6 rounded-md border border-dashed border-ink-200 text-center">
+                    <Monitor className="w-8 h-8 text-ink-300 mx-auto mb-2" />
+                    <p className="text-sm text-ink-400">暂无活跃会话</p>
+                  </div>
                 ) : (
-                  userRiskEvents.slice(0, 5).map((ev, i) => (
-                    <div key={ev.id} className="flex items-center gap-3 p-3 rounded-md bg-ink-50/60">
-                      <span className="w-2 h-2 rounded-full bg-danger-500" />
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 text-sm">
-                          <span className="font-mono text-xs text-ink-500">{ev.detectedAt.slice(5, 16)}</span>
-                          <span className="badge-danger">异常</span>
-                          <span className={levelBadgeMap[ev.level]}>{levelLabelMap[ev.level]}</span>
-                        </div>
-                        <div className="mt-0.5 text-xs text-ink-600 flex gap-3 flex-wrap">
-                          <span className="font-mono">IP {ev.ip}</span>
-                          <span>{ev.type}</span>
+                  <div className="space-y-2">
+                    {userSessions.map((ss) => (
+                      <div
+                        key={ss.id}
+                        className={`p-3 rounded-md border ${
+                          ss.isOnline ? "bg-safe-50/50 border-safe-200/60" : "bg-ink-50/60 border-ink-200/60"
+                        }`}
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="text-sm font-medium text-ink-800">{ss.appName}</span>
+                              {ss.isOnline ? (
+                                <span className="relative flex h-2 w-2">
+                                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-safe-400 opacity-75"></span>
+                                  <span className="relative inline-flex rounded-full h-2 w-2 bg-safe-500"></span>
+                                </span>
+                              ) : null}
+                              <span className={ss.isOnline ? "badge-safe" : "badge-neutral"}>
+                                {ss.isOnline ? "在线" : "已下线"}
+                              </span>
+                            </div>
+                            <div className="mt-1.5 text-xs text-ink-500 flex flex-wrap gap-x-3 gap-y-1">
+                              <span className="inline-flex items-center gap-1">
+                                <MapPin className="w-3 h-3" />
+                                {ss.location}
+                              </span>
+                              <span className="font-mono">IP {ss.ip}</span>
+                            </div>
+                            <div className="mt-1 text-xs text-ink-500 flex flex-wrap gap-x-3 gap-y-1">
+                              <span className="inline-flex items-center gap-1">
+                                <Clock className="w-3 h-3" />
+                                登录 {ss.loginAt.slice(5, 16)}
+                              </span>
+                              <span>活跃 {ss.lastActiveAt.slice(5, 16)}</span>
+                            </div>
+                            <div className="mt-1 text-xs text-ink-500 truncate" title={ss.userAgent}>
+                              {ss.userAgent}
+                            </div>
+                          </div>
+                          {ss.isOnline && (
+                            <button
+                              onClick={() => setLogoutSingleModal({ sessionId: ss.id, appName: ss.appName })}
+                              className="flex-shrink-0 inline-flex items-center gap-1 px-2.5 py-1.5 rounded-md text-xs font-medium text-warn-700 bg-warn-50 hover:bg-warn-100 border border-warn-200/60 transition-colors"
+                            >
+                              <LogOut className="w-3 h-3" />
+                              下线
+                            </button>
+                          )}
                         </div>
                       </div>
-                    </div>
-                  ))
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div>
+                <h4 className="text-sm font-semibold text-ink-800 mb-3 flex items-center gap-2">
+                  <Activity className="w-4 h-4 text-brand-600" />
+                  登录日志
+                  <span className="badge-neutral tabular-nums">{userLoginLogs.length} 条</span>
+                </h4>
+                {userLoginLogs.length === 0 ? (
+                  <div className="p-6 rounded-md border border-dashed border-ink-200 text-center">
+                    <Activity className="w-8 h-8 text-ink-300 mx-auto mb-2" />
+                    <p className="text-sm text-ink-400">暂无登录日志</p>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {userLoginLogs.map((log) => {
+                      const TypeIcon = log.status === "success" ? ShieldCheck : ShieldX;
+                      const statusBadge = log.status === "success" ? "badge-safe" : "badge-danger";
+                      const statusText = log.status === "success" ? "成功" : "失败";
+                      return (
+                        <div
+                          key={log.id}
+                          className="flex items-start gap-3 p-3 rounded-md bg-ink-50/60 border border-ink-100"
+                        >
+                          <div
+                            className={`w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 ${
+                              log.status === "success" ? "bg-safe-100 text-safe-600" : "bg-danger-100 text-danger-600"
+                            }`}
+                          >
+                            <TypeIcon className="w-3.5 h-3.5" />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="font-mono text-xs text-ink-500">{log.loginAt.slice(5, 16)}</span>
+                              <span className={statusBadge}>{statusText}</span>
+                              <span className="text-xs font-medium text-ink-700">{log.appName}</span>
+                            </div>
+                            <div className="mt-1 text-xs text-ink-600 flex flex-wrap gap-x-3 gap-y-1">
+                              <span className="inline-flex items-center gap-1">
+                                <MapPin className="w-3 h-3 text-ink-400" />
+                                {log.location}
+                              </span>
+                              <span className="font-mono">IP {log.ip}</span>
+                            </div>
+                            <div className="mt-1 text-xs text-ink-500 flex flex-wrap gap-x-3 gap-y-1">
+                              <span>{log.os}</span>
+                              <span>·</span>
+                              <span>{log.browser}</span>
+                              <span>·</span>
+                              <span className="capitalize">{log.deviceType}</span>
+                            </div>
+                            {log.failReason && (
+                              <div className="mt-1 text-xs text-danger-600 bg-danger-50 px-2 py-1 rounded inline-block">
+                                {log.failReason}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
                 )}
               </div>
             </div>
@@ -1353,14 +1612,16 @@ function AccountDetailDrawer({ account, onClose }: { account: RiskAccount; onClo
             <div className="space-y-4 animate-fade-in-up">
               <div className="grid grid-cols-3 gap-3">
                 <div className="card-base p-3 text-center">
-                  <div className="text-2xl font-bold text-danger-600 tabular-nums font-display">{account.eventCount}</div>
+                  <div className="text-2xl font-bold text-danger-600 tabular-nums font-display">
+                    {userRiskEvents.length}
+                  </div>
                   <div className="text-xs text-ink-500 mt-1">风险事件</div>
                 </div>
                 <div className="card-base p-3 text-center">
                   <div className="text-2xl font-bold text-warn-600 tabular-nums font-display">
-                    {account.level === "high" ? 90 : account.level === "medium" ? 70 : 45}
+                    {userRiskEvents.filter((e) => e.status === "pending").length}
                   </div>
-                  <div className="text-xs text-ink-500 mt-1">风险评分</div>
+                  <div className="text-xs text-ink-500 mt-1">待处置</div>
                 </div>
                 <div className="card-base p-3 text-center">
                   <div className={`text-2xl font-bold tabular-nums font-display ${
@@ -1368,26 +1629,139 @@ function AccountDetailDrawer({ account, onClose }: { account: RiskAccount; onClo
                   }`}>
                     {account.level === "high" ? "高" : account.level === "medium" ? "中" : "低"}
                   </div>
-                  <div className="text-xs text-ink-500 mt-1">处置优先级</div>
+                  <div className="text-xs text-ink-500 mt-1">最高等级</div>
                 </div>
               </div>
+
               <div>
-                <h4 className="text-sm font-semibold text-ink-800 mb-2">触发风险原因</h4>
-                <div className="p-3 rounded-md bg-danger-50 border border-danger-200/60">
-                  <div className="flex items-start gap-2">
-                    {(() => {
-                      const Icon = riskTypeIconMap[account.reason];
-                      return <Icon className="w-4 h-4 text-danger-600 mt-0.5 flex-shrink-0" />;
-                    })()}
-                    <div>
-                      <div className="text-sm font-medium text-danger-700">{account.reason}</div>
-                      <div className="text-xs text-danger-600/80 mt-0.5">
-                        {userRiskEvents[0]?.description || "检测到异常行为模式"}
-                      </div>
-                    </div>
+                <h4 className="text-sm font-semibold text-ink-800 mb-3 flex items-center gap-2">
+                  <AlertTriangle className="w-4 h-4 text-danger-600" />
+                  全量风险事件
+                  <span className="badge-neutral tabular-nums">{userRiskEvents.length} 条</span>
+                </h4>
+                {userRiskEvents.length === 0 ? (
+                  <div className="p-6 rounded-md border border-dashed border-ink-200 text-center">
+                    <ShieldCheck className="w-8 h-8 text-ink-300 mx-auto mb-2" />
+                    <p className="text-sm text-ink-400">暂无风险事件</p>
                   </div>
-                </div>
+                ) : (
+                  <div className="space-y-3">
+                    {userRiskEvents.map((ev) => {
+                      const TypeIcon = riskTypeIconMap[ev.type];
+                      return (
+                        <div
+                          key={ev.id}
+                          className={`p-3 rounded-md border ${
+                            ev.status === "pending"
+                              ? "bg-warn-50/50 border-warn-200/60"
+                              : ev.status === "resolved"
+                              ? "bg-safe-50/50 border-safe-200/60"
+                              : "bg-ink-50/60 border-ink-200/60"
+                          }`}
+                        >
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className={`inline-flex items-center gap-1 ${levelBadgeMap[ev.level]}`}>
+                                  <TypeIcon className="w-3 h-3" />
+                                  {levelLabelMap[ev.level]}
+                                </span>
+                                <span className="badge-info">{ev.type}</span>
+                                <span className={statusBadgeMap[ev.status]}>
+                                  {statusLabelMap[ev.status]}
+                                </span>
+                                <span className="font-mono text-xs text-ink-500">
+                                  {ev.detectedAt.slice(5, 16)}
+                                </span>
+                              </div>
+                              <div className="mt-2 text-sm text-ink-700">{ev.description}</div>
+                              <div className="mt-1.5 text-xs text-ink-500 flex flex-wrap gap-x-3 gap-y-1">
+                                <span className="font-mono">IP: {ev.ip}</span>
+                                <span>ID: {ev.id.toUpperCase()}</span>
+                              </div>
+                              {ev.status !== "pending" && (
+                                <div className="mt-2 pt-2 border-t border-ink-200/60 space-y-1">
+                                  <div className="text-xs text-ink-600 flex flex-wrap gap-x-3 gap-y-1">
+                                    <span>
+                                      处置动作:{" "}
+                                      <span className="font-medium text-ink-800">
+                                        {ev.handleAction === "freeze"
+                                          ? "冻结账号"
+                                          : ev.handleAction === "logout"
+                                          ? "强制下线"
+                                          : "标记放行"}
+                                      </span>
+                                    </span>
+                                    <span>
+                                      处置人:{" "}
+                                      <span className="font-medium text-ink-800">
+                                        {ev.handlerName || "-"}
+                                      </span>
+                                    </span>
+                                    <span className="font-mono">
+                                      {ev.handleAt?.slice(5, 16) || "-"}
+                                    </span>
+                                  </div>
+                                  {ev.handleRemark && (
+                                    <div className="text-xs text-ink-500">
+                                      备注: {ev.handleRemark}
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                            {ev.status === "pending" && (
+                              <div className="flex-shrink-0 flex flex-col gap-1.5">
+                                <button
+                                  onClick={() =>
+                                    setHandleSingleModal({
+                                      eventId: ev.id,
+                                      action: "freeze",
+                                      actionLabel: "冻结",
+                                    })
+                                  }
+                                  className="inline-flex items-center gap-1 px-2 py-1 rounded text-xs font-medium text-danger-700 bg-danger-50 hover:bg-danger-100 border border-danger-200/60 transition-colors"
+                                >
+                                  <Ban className="w-3 h-3" />
+                                  冻结
+                                </button>
+                                <button
+                                  onClick={() =>
+                                    setHandleSingleModal({
+                                      eventId: ev.id,
+                                      action: "logout",
+                                      actionLabel: "下线",
+                                    })
+                                  }
+                                  className="inline-flex items-center gap-1 px-2 py-1 rounded text-xs font-medium text-warn-700 bg-warn-50 hover:bg-warn-100 border border-warn-200/60 transition-colors"
+                                >
+                                  <LogOut className="w-3 h-3" />
+                                  下线
+                                </button>
+                                <button
+                                  onClick={() => {
+                                    setSingleRemark("");
+                                    setHandleSingleModal({
+                                      eventId: ev.id,
+                                      action: "release",
+                                      actionLabel: "放行",
+                                    });
+                                  }}
+                                  className="inline-flex items-center gap-1 px-2 py-1 rounded text-xs font-medium text-safe-700 bg-safe-50 hover:bg-safe-100 border border-safe-200/60 transition-colors"
+                                >
+                                  <CheckCircle2 className="w-3 h-3" />
+                                  放行
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
+
               <div>
                 <h4 className="text-sm font-semibold text-ink-800 mb-2">建议处置措施</h4>
                 <div className="space-y-2">
@@ -1410,29 +1784,138 @@ function AccountDetailDrawer({ account, onClose }: { account: RiskAccount; onClo
 
           {detailTab === "history" && (
             <div className="space-y-3 animate-fade-in-up">
-              <h4 className="text-sm font-semibold text-ink-800">历史处置记录</h4>
+              <h4 className="text-sm font-semibold text-ink-800 flex items-center gap-2">
+                <FileDown className="w-4 h-4 text-brand-600" />
+                处置记录
+                <span className="badge-neutral tabular-nums">{userHistory.length} 条</span>
+              </h4>
               {userHistory.length === 0 ? (
-                <p className="text-sm text-ink-400 py-6 text-center">暂无处置历史记录</p>
+                <div className="p-6 rounded-md border border-dashed border-ink-200 text-center">
+                  <FileDown className="w-8 h-8 text-ink-300 mx-auto mb-2" />
+                  <p className="text-sm text-ink-400">暂无处置历史记录</p>
+                </div>
               ) : (
                 <ol className="relative border-l border-ink-200 ml-2 space-y-4">
-                  {userHistory.map((h, i) => (
-                    <li key={h.id} className="ml-5">
-                      <span className="absolute -left-[15px] w-3 h-3 rounded-full bg-brand-500 ring-4 ring-white" />
-                      <div className="flex items-center gap-2 text-xs flex-wrap">
-                        <span className="font-mono text-ink-400">{h.operateAt.slice(5, 16)}</span>
-                        <span className="badge-info">{h.action}</span>
-                        <span className="text-ink-600">处置人：{h.operatorName}</span>
-                      </div>
-                      <p className="mt-1 text-sm text-ink-700">
-                        {h.afterValue || h.beforeValue || "无详细备注"}
-                      </p>
-                    </li>
-                  ))}
+                  {userHistory.map((h) => {
+                    const isRisk = h.source === "risk";
+                    const dotColor = isRisk ? "bg-danger-500" : "bg-brand-500";
+                    return (
+                      <li key={h.id} className="ml-5">
+                        <span
+                          className={`absolute -left-[15px] w-3 h-3 rounded-full ring-4 ring-white ${dotColor}`}
+                        />
+                        <div className="flex items-center gap-2 text-xs flex-wrap">
+                          <span className="font-mono text-ink-400">{h.time.slice(5, 16)}</span>
+                          <span className={isRisk ? "badge-danger" : "badge-info"}>{h.action}</span>
+                          <span className="text-ink-600">操作人：{h.operatorName}</span>
+                        </div>
+                        <p className="mt-1 text-sm text-ink-700 break-words">{h.detail}</p>
+                      </li>
+                    );
+                  })}
                 </ol>
               )}
             </div>
           )}
         </div>
+
+        <Modal
+          open={!!logoutSingleModal}
+          onClose={() => setLogoutSingleModal(null)}
+          title="确认下线该会话？"
+          icon={<LogOut className="w-5 h-5 text-warn-600" />}
+          footer={
+            <>
+              <button className="btn-secondary" onClick={() => setLogoutSingleModal(null)}>
+                取消
+              </button>
+              <button className="btn-primary" onClick={handleLogoutSingle}>
+                确认下线
+              </button>
+            </>
+          }
+        >
+          {logoutSingleModal && (
+            <div className="space-y-3 text-sm">
+              <p className="text-ink-700">
+                将下线应用{" "}
+                <span className="font-semibold text-ink-800">{logoutSingleModal.appName}</span>{" "}
+                的当前会话。
+              </p>
+              <p className="text-ink-500">用户需重新登录该应用才能继续使用。</p>
+            </div>
+          )}
+        </Modal>
+
+        <Modal
+          open={!!handleSingleModal}
+          onClose={() => {
+            setHandleSingleModal(null);
+            setSingleRemark("");
+          }}
+          title={`确认${handleSingleModal?.actionLabel || ""}该风险事件？`}
+          icon={
+            handleSingleModal?.action === "freeze" ? (
+              <Ban className="w-5 h-5 text-danger-600" />
+            ) : handleSingleModal?.action === "logout" ? (
+              <LogOut className="w-5 h-5 text-warn-600" />
+            ) : (
+              <CheckCircle2 className="w-5 h-5 text-safe-600" />
+            )
+          }
+          footer={
+            <>
+              <button
+                className="btn-secondary"
+                onClick={() => {
+                  setHandleSingleModal(null);
+                  setSingleRemark("");
+                }}
+              >
+                取消
+              </button>
+              <button className="btn-primary" onClick={handleSingleEvent}>
+                确认{handleSingleModal?.actionLabel}
+              </button>
+            </>
+          }
+        >
+          {handleSingleModal && (
+            <div className="space-y-3">
+              <div className="p-3 rounded-md bg-ink-50/60 border border-ink-200 text-sm">
+                <span className="font-medium text-ink-800">风险事件ID</span>
+                <span className="text-ink-500 mx-1">/</span>
+                <span className="font-mono text-xs text-ink-600">
+                  {handleSingleModal.eventId.toUpperCase()}
+                </span>
+              </div>
+              {handleSingleModal.action === "release" && (
+                <div>
+                  <label className="block text-xs font-medium text-ink-700 mb-1.5">
+                    放行原因（必填）
+                  </label>
+                  <textarea
+                    className="input-base min-h-[72px] resize-y text-sm"
+                    placeholder="请填写人工核查结果或放行说明..."
+                    value={singleRemark}
+                    onChange={(e) => setSingleRemark(e.target.value)}
+                  />
+                </div>
+              )}
+              {handleSingleModal.action === "freeze" && (
+                <div className="flex items-start gap-2 p-3 rounded-md bg-warn-50 border border-warn-200/60 text-warn-700">
+                  <AlertTriangle className="w-4 h-4 mt-0.5 flex-shrink-0" />
+                  <span className="text-xs">冻结后用户将无法登录任何系统，需人工审核后才能解冻。</span>
+                </div>
+              )}
+              {handleSingleModal.action === "logout" && (
+                <p className="text-sm text-ink-500">
+                  将下线该用户所有在线会话，风险事件状态变更为已处置。
+                </p>
+              )}
+            </div>
+          )}
+        </Modal>
       </div>
     </div>
   );
@@ -1896,6 +2379,7 @@ function RecordsTab() {
   const auditLogs = useAppStore((s) => s.auditLogs);
   const riskEvents = useAppStore((s) => s.riskEvents);
   const users = useAppStore((s) => s.users);
+  const navigate = useNavigate();
 
   const [timeRange, setTimeRange] = useState("14d");
   const [operatorFilter, setOperatorFilter] = useState("");
@@ -1915,6 +2399,21 @@ function RecordsTab() {
     if (action.includes("放行")) return "release";
     if (action.includes("驳回")) return "reject";
     return "release";
+  };
+
+  const handleJumpAuditByUser = (userName: string) => {
+    toast.info(`已跳转至审计页面，筛选用户：${userName}`);
+    navigate("/audit");
+  };
+
+  const handleJumpAuditByIp = (ip: string) => {
+    toast.info(`已跳转至审计页面，筛选 IP：${ip}`);
+    navigate("/audit");
+  };
+
+  const handleJumpAuditByApp = (appName: string) => {
+    toast.info(`已跳转至审计页面，筛选应用：${appName}`);
+    navigate("/audit");
   };
 
   const filteredRecords = useMemo(() => {
@@ -2055,6 +2554,7 @@ function RecordsTab() {
               const u = users.find((x) => x.name === r.targetName.split(" / ")[0]);
               const targetDept = u?.departmentName || (r.targetName.includes(" / ") ? r.targetName.split(" / ")[1] || "" : "");
               const dispTargetName = r.targetName.split(" / ")[0];
+              const riskIp = ev?.ip;
               return (
                 <tr key={r.id} className="table-row">
                   <td className="table-td">
@@ -2077,21 +2577,44 @@ function RecordsTab() {
                     </span>
                   </td>
                   <td className="table-td">
-                    <div className="text-sm text-ink-800 font-medium">{dispTargetName}</div>
-                    <div className="text-xs text-ink-500">{targetDept}</div>
+                    <div className="flex items-center gap-1.5">
+                      <div>
+                        <div className="text-sm text-ink-800 font-medium">{dispTargetName}</div>
+                        <div className="text-xs text-ink-500">{targetDept}</div>
+                      </div>
+                      <button
+                        onClick={() => handleJumpAuditByUser(dispTargetName)}
+                        className="inline-flex items-center justify-center w-6 h-6 rounded-md text-brand-500 hover:bg-brand-50 hover:text-brand-600 transition-colors shrink-0"
+                        title={`查看用户 ${dispTargetName} 的审计会话日志`}
+                      >
+                        <History className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
                   </td>
                   <td className="table-td">
-                    <button className="inline-flex items-center gap-1 text-sm text-brand-600 hover:text-brand-700 hover:underline font-mono">
-                      <ShieldAlert className="w-3.5 h-3.5" />
-                      <span>{(r.targetId || "-").toUpperCase().slice(0, 8)}</span>
-                    </button>
-                    {ev && (
-                      <div className="mt-0.5">
-                        <span className={levelBadgeMap[ev.level]}>
-                          {levelLabelMap[ev.level]}
-                        </span>
-                      </div>
-                    )}
+                    <div className="space-y-1">
+                      <button className="inline-flex items-center gap-1 text-sm text-brand-600 hover:text-brand-700 hover:underline font-mono">
+                        <ShieldAlert className="w-3.5 h-3.5" />
+                        <span>{(r.targetId || "-").toUpperCase().slice(0, 8)}</span>
+                      </button>
+                      {ev && (
+                        <div className="flex flex-wrap items-center gap-1">
+                          <span className={levelBadgeMap[ev.level]}>
+                            {levelLabelMap[ev.level]}
+                          </span>
+                          {riskIp && (
+                            <button
+                              onClick={() => handleJumpAuditByIp(riskIp)}
+                              className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-mono text-ink-600 hover:bg-brand-50 hover:text-brand-600 border border-ink-200 hover:border-brand-200 transition-colors"
+                              title={`查看 IP ${riskIp} 的审计会话日志`}
+                            >
+                              <History className="w-2.5 h-2.5" />
+                              {riskIp}
+                            </button>
+                          )}
+                        </div>
+                      )}
+                    </div>
                   </td>
                   <td className="table-td">
                     <div className="relative">
@@ -2111,7 +2634,18 @@ function RecordsTab() {
                     </div>
                   </td>
                   <td className="table-td">
-                    <span className="font-mono text-xs text-ink-600">{r.ip || "-"}</span>
+                    <div className="flex items-center gap-1.5">
+                      <span className="font-mono text-xs text-ink-600">{r.ip || "-"}</span>
+                      {r.ip && (
+                        <button
+                          onClick={() => handleJumpAuditByIp(r.ip)}
+                          className="inline-flex items-center justify-center w-6 h-6 rounded-md text-brand-500 hover:bg-brand-50 hover:text-brand-600 transition-colors shrink-0"
+                          title={`查看 IP ${r.ip} 的审计会话日志`}
+                        >
+                          <History className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </div>
                   </td>
                 </tr>
               );

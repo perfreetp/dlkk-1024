@@ -58,6 +58,13 @@ export interface Position {
   quota?: number;
 }
 
+export interface LastTestResult {
+  success: boolean;
+  reason?: string;
+  testedAt: string;
+  duration: number;
+}
+
 export interface Application {
   id: string;
   name: string;
@@ -76,6 +83,7 @@ export interface Application {
   sort: number;
   createdAt: string;
   category: string;
+  lastTest?: LastTestResult;
 }
 
 export interface AppUsageStat {
