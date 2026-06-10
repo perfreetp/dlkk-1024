@@ -1,5 +1,5 @@
-import { useState, useMemo } from "react";
-import { useNavigate } from "react-router-dom";
+import { useState, useMemo, useEffect, createContext, useContext } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   AlertTriangle,
   ShieldCheck,
@@ -50,10 +50,28 @@ import {
 } from "recharts";
 import { useAppStore } from "@/stores/useAppStore";
 import { Modal, toast } from "@/components/ui/Modal";
-import { mockRiskRules, mockLoginLogs } from "@/mock";
+import { mockRiskRules, mockLoginLogs, mockApplications } from "@/mock";
 import type { RiskLevel, RiskType, RiskStatus, HandleAction } from "@/types";
 
 type TabKey = "overview" | "accounts" | "rules" | "records";
+
+interface RiskFilterContextValue {
+  urlUserId: string | null;
+  urlUserName: string | null;
+  urlIp: string | null;
+  urlApp: string | null;
+  clearUrlFilters: () => void;
+}
+
+const RiskFilterContext = createContext<RiskFilterContextValue>({
+  urlUserId: null,
+  urlUserName: null,
+  urlIp: null,
+  urlApp: null,
+  clearUrlFilters: () => {},
+});
+
+const useRiskFilter = () => useContext(RiskFilterContext);
 
 const tabs: { key: TabKey; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
   { key: "overview", label: "风险概览", icon: Activity },
@@ -127,43 +145,84 @@ function generate14DayTrend() {
 }
 
 export default function Risk() {
+  return <RiskPage />;
+}
+
+function RiskPage() {
+  const [searchParams, setSearchParams] = useSearchParams();
   const [activeTab, setActiveTab] = useState<TabKey>("overview");
 
+  const userIdParam = searchParams.get("userId");
+  const ipParam = searchParams.get("ip");
+  const appParam = searchParams.get("app");
+  const userNameParam = searchParams.get("userName");
+
+  useEffect(() => {
+    const appliedConditions: string[] = [];
+    const hasAnyFilter = userIdParam || ipParam || appParam || userNameParam;
+
+    if (hasAnyFilter) {
+      if (userIdParam) appliedConditions.push(`用户ID: ${userIdParam}`);
+      if (userNameParam) appliedConditions.push(`用户名: ${userNameParam}`);
+      if (ipParam) appliedConditions.push(`IP: ${ipParam}`);
+      if (appParam) {
+        const app = mockApplications.find((a) => a.id === appParam);
+        appliedConditions.push(`应用: ${app?.name || appParam}`);
+      }
+      setActiveTab("accounts");
+      toast.info(`已根据URL参数筛选异常账号：${appliedConditions.join("，")}`);
+    }
+  }, [userIdParam, ipParam, appParam, userNameParam]);
+
+  const clearUrlFilters = () => {
+    setSearchParams({});
+  };
+
+  const ctxValue: RiskFilterContextValue = {
+    urlUserId: userIdParam,
+    urlUserName: userNameParam,
+    urlIp: ipParam,
+    urlApp: appParam,
+    clearUrlFilters,
+  };
+
   return (
-    <div className="space-y-5">
-      <section className="animate-fade-in-up">
-        <h1 className="font-display text-2xl font-bold text-ink-800">风险处置</h1>
-        <p className="mt-1 text-sm text-ink-500">
-          智能识别访问异常，闭环处置安全风险事件，保障账号安全
-        </p>
-      </section>
+    <RiskFilterContext.Provider value={ctxValue}>
+      <div className="space-y-5">
+        <section className="animate-fade-in-up">
+          <h1 className="font-display text-2xl font-bold text-ink-800">风险处置</h1>
+          <p className="mt-1 text-sm text-ink-500">
+            智能识别访问异常，闭环处置安全风险事件，保障账号安全
+          </p>
+        </section>
 
-      <section className="card-base p-1.5 inline-flex gap-1 animate-fade-in-up stagger-1">
-        {tabs.map((t) => {
-          const isActive = activeTab === t.key;
-          const Icon = t.icon;
-          return (
-            <button
-              key={t.key}
-              onClick={() => setActiveTab(t.key)}
-              className={
-                isActive
-                  ? "inline-flex items-center gap-1.5 px-4 py-2 rounded-md text-sm font-medium bg-brand-700 text-white shadow-sm transition-all duration-200"
-                  : "inline-flex items-center gap-1.5 px-4 py-2 rounded-md text-sm font-medium text-ink-600 hover:bg-ink-100 hover:text-ink-800 transition-all duration-200"
-              }
-            >
-              <Icon className="w-4 h-4" />
-              <span>{t.label}</span>
-            </button>
-          );
-        })}
-      </section>
+        <section className="card-base p-1.5 inline-flex gap-1 animate-fade-in-up stagger-1">
+          {tabs.map((t) => {
+            const isActive = activeTab === t.key;
+            const Icon = t.icon;
+            return (
+              <button
+                key={t.key}
+                onClick={() => setActiveTab(t.key)}
+                className={
+                  isActive
+                    ? "inline-flex items-center gap-1.5 px-4 py-2 rounded-md text-sm font-medium bg-brand-700 text-white shadow-sm transition-all duration-200"
+                    : "inline-flex items-center gap-1.5 px-4 py-2 rounded-md text-sm font-medium text-ink-600 hover:bg-ink-100 hover:text-ink-800 transition-all duration-200"
+                }
+              >
+                <Icon className="w-4 h-4" />
+                <span>{t.label}</span>
+              </button>
+            );
+          })}
+        </section>
 
-      {activeTab === "overview" && <OverviewTab />}
-      {activeTab === "accounts" && <AccountsTab />}
-      {activeTab === "rules" && <RulesTab />}
-      {activeTab === "records" && <RecordsTab />}
-    </div>
+        {activeTab === "overview" && <OverviewTab />}
+        {activeTab === "accounts" && <AccountsTab />}
+        {activeTab === "rules" && <RulesTab />}
+        {activeTab === "records" && <RecordsTab />}
+      </div>
+    </RiskFilterContext.Provider>
   );
 }
 
@@ -541,6 +600,7 @@ function AccountsTab() {
   const batchLogoutSessions = useAppStore((s) => s.batchLogoutSessions);
   const addAuditLog = useAppStore((s) => s.addAuditLog);
   const store = useAppStore;
+  const { urlUserId, urlUserName, urlIp, urlApp, clearUrlFilters } = useRiskFilter();
 
   const [statusTab, setStatusTab] = useState<
     "frozen" | "pending" | "recovered" | "offline" | "all"
@@ -561,6 +621,8 @@ function AccountsTab() {
   const [batchLogoutOpen, setBatchLogoutOpen] = useState(false);
   const [batchReleaseOpen, setBatchReleaseOpen] = useState(false);
   const [batchReleaseRemark, setBatchReleaseRemark] = useState("");
+
+  const hasUrlFilter = !!(urlUserId || urlUserName || urlIp || urlApp);
 
   const accounts = useMemo<RiskAccount[]>(() => {
     const userEvents = new Map<string, typeof riskEvents>();
@@ -625,9 +687,26 @@ function AccountsTab() {
           return false;
         }
       }
+      if (urlUserId && a.id.toLowerCase() !== urlUserId.toLowerCase()) return false;
+      if (urlUserName && !a.name.toLowerCase().includes(urlUserName.toLowerCase())) return false;
+      if (urlIp) {
+        const userEvents = riskEvents.filter((e) => e.userId === a.id);
+        const hasMatchingIp = userEvents.some((e) => e.ip.includes(urlIp));
+        if (!hasMatchingIp) return false;
+      }
+      if (urlApp) {
+        const userEvents = riskEvents.filter((e) => e.userId === a.id);
+        const kwApp = urlApp.toLowerCase();
+        const appMatch = mockApplications.find((ap) => ap.id === urlApp);
+        const appName = appMatch?.name?.toLowerCase() || kwApp;
+        const hasMatchingApp = mockLoginLogs.some(
+          (l) => l.userId === a.id && (l.appId === urlApp || l.appName.toLowerCase().includes(appName))
+        ) || userEvents.some((e) => e.description.toLowerCase().includes(appName) || e.description.toLowerCase().includes(kwApp));
+        if (!hasMatchingApp) return false;
+      }
       return true;
     });
-  }, [accounts, statusTab, levelFilter, typeFilter, searchText]);
+  }, [accounts, statusTab, levelFilter, typeFilter, searchText, urlUserId, urlUserName, urlIp, urlApp, riskEvents]);
 
   const toggleSelect = (id: string) => {
     setSelectedIds((prev) =>
@@ -949,6 +1028,29 @@ function AccountsTab() {
                 </select>
                 <ChevronDown className="absolute right-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-ink-400 pointer-events-none" />
               </div>
+            </div>
+
+            <div className="flex items-center gap-2 lg:ml-auto">
+              {(hasUrlFilter || searchText || levelFilter !== "all" || typeFilter !== "all" || statusTab !== "all") && (
+                <button
+                  className="btn-ghost"
+                  onClick={() => {
+                    setSearchText("");
+                    setLevelFilter("all");
+                    setTypeFilter("all");
+                    setStatusTab("all");
+                    if (hasUrlFilter) {
+                      clearUrlFilters();
+                      toast.success("已清除所有筛选条件（含URL参数）");
+                    } else {
+                      toast.success("已清除所有筛选条件");
+                    }
+                  }}
+                >
+                  <X className="w-4 h-4" />
+                  <span>清除筛选</span>
+                </button>
+              )}
             </div>
           </div>
         </div>
@@ -1315,12 +1417,23 @@ function AccountDetailDrawer({ account, onClose }: { account: RiskAccount; onClo
   const [singleRemark, setSingleRemark] = useState("");
 
   const latestUser = users.find((u) => u.id === account.id);
-  const currentStatus: AccountStatus = latestUser?.status === "frozen" ? "frozen" : account.status;
 
   const userRiskEvents = useMemo(
     () => riskEvents.filter((e) => e.userId === account.id),
     [riskEvents, account.id]
   );
+
+  const currentStatus: AccountStatus = useMemo(() => {
+    if (latestUser?.status === "frozen") return "frozen";
+    if (userRiskEvents.some((e) => e.status === "pending")) return "pending";
+    if (
+      userRiskEvents.length > 0 &&
+      userRiskEvents.every((e) => e.status === "resolved") &&
+      userRiskEvents.some((e) => e.handleAction === "logout")
+    )
+      return "offline";
+    return "recovered";
+  }, [latestUser?.status, userRiskEvents]);
 
   const userSessions = useMemo(
     () => sessions.filter((s) => s.userId === account.id),
@@ -2401,19 +2514,32 @@ function RecordsTab() {
     return "release";
   };
 
-  const handleJumpAuditByUser = (userName: string) => {
+  const handleJumpAuditByUser = (userName: string, appId?: string) => {
+    const params = new URLSearchParams();
+    params.set("user", userName);
+    if (appId) params.set("app", appId);
     toast.info(`已跳转至审计页面，筛选用户：${userName}`);
-    navigate("/audit");
+    navigate(`/audit?${params.toString()}`);
   };
 
-  const handleJumpAuditByIp = (ip: string) => {
+  const handleJumpAuditByIp = (ip: string, appId?: string) => {
+    const params = new URLSearchParams();
+    params.set("ip", ip);
+    if (appId) params.set("app", appId);
+    params.set("status", "fail");
     toast.info(`已跳转至审计页面，筛选 IP：${ip}`);
-    navigate("/audit");
+    navigate(`/audit?${params.toString()}`);
   };
 
-  const handleJumpAuditByApp = (appName: string) => {
+  const handleJumpAuditByApp = (appName: string, appId?: string) => {
+    const params = new URLSearchParams();
+    if (appId) {
+      params.set("app", appId);
+    } else {
+      params.set("user", appName);
+    }
     toast.info(`已跳转至审计页面，筛选应用：${appName}`);
-    navigate("/audit");
+    navigate(`/audit?${params.toString()}`);
   };
 
   const filteredRecords = useMemo(() => {
@@ -2421,52 +2547,118 @@ function RecordsTab() {
       const dtype = parseDisposeType(l.action);
       if (typeFilter !== "all" && dtype !== typeFilter) return false;
       if (operatorFilter && !l.operatorName.includes(operatorFilter)) return false;
+      if (levelFilter !== "all") {
+        const ev = riskEvents.find((e) => e.id === l.targetId);
+        if (!ev || ev.level !== levelFilter) return false;
+      }
       if (searchText) {
         const kw = searchText.toLowerCase();
-        const remark = l.afterValue || l.beforeValue || "";
+        const targetName = l.targetName.toLowerCase();
+        const operatorName = l.operatorName.toLowerCase();
+        const beforeValue = (l.beforeValue || "").toLowerCase();
+        const afterValue = (l.afterValue || "").toLowerCase();
         if (
-          !l.targetName.toLowerCase().includes(kw) &&
-          !remark.toLowerCase().includes(kw) &&
-          !l.targetId.toLowerCase().includes(kw) &&
-          !l.operatorName.toLowerCase().includes(kw)
+          !targetName.includes(kw) &&
+          !operatorName.includes(kw) &&
+          !beforeValue.includes(kw) &&
+          !afterValue.includes(kw)
         ) {
           return false;
         }
       }
       return true;
     });
-  }, [disposalLogs, typeFilter, operatorFilter, searchText]);
+  }, [disposalLogs, typeFilter, operatorFilter, levelFilter, searchText, riskEvents]);
+
+  const handleExport = () => {
+    if (filteredRecords.length === 0) {
+      toast.warn("暂无可导出的数据");
+      return;
+    }
+    const headers = [
+      "处置时间",
+      "处置人",
+      "处置类型",
+      "处置对象",
+      "关联风险等级",
+      "关联风险类型",
+      "变更前",
+      "变更后",
+      "IP地址",
+    ];
+    const rows = filteredRecords.map((r) => {
+      const ev = riskEvents.find((e) => e.id === r.targetId);
+      const dtype = parseDisposeType(r.action);
+      return [
+        r.operateAt,
+        r.operatorName,
+        disposeTypeLabelMap[dtype],
+        r.targetName,
+        ev ? levelLabelMap[ev.level] : "-",
+        ev ? ev.type : "-",
+        (r.beforeValue || "").replace(/,/g, "，"),
+        (r.afterValue || "").replace(/,/g, "，"),
+        r.ip || "-",
+      ];
+    });
+    const csvContent =
+      "\uFEFF" +
+      [headers, ...rows]
+        .map((row) => row.map((cell) => `"${cell}"`).join(","))
+        .join("\n");
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    const pad = (n: number) => n.toString().padStart(2, "0");
+    const now = new Date();
+    const ts = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+    link.href = url;
+    link.download = `风险处置记录_${ts}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+    toast.success(`已导出 ${filteredRecords.length} 条记录`);
+  };
 
   return (
     <div className="space-y-4">
       <section className="card-base p-4 animate-fade-in-up">
         <div className="flex flex-col gap-4">
-          <div className="flex flex-wrap items-center gap-1">
-            {(
-              [
-                { key: "1d", label: "今天" },
-                { key: "7d", label: "近7天" },
-                { key: "14d", label: "近14天" },
-                { key: "30d", label: "近30天" },
-                { key: "custom", label: "自定义" },
-              ] as const
-            ).map((t) => {
-              const isActive = timeRange === t.key;
-              return (
-                <button
-                  key={t.key}
-                  onClick={() => setTimeRange(t.key)}
-                  className={
-                    isActive
-                      ? "inline-flex items-center gap-1 px-3 py-1.5 rounded-md text-sm font-medium bg-brand-700 text-white shadow-sm"
-                      : "inline-flex items-center gap-1 px-3 py-1.5 rounded-md text-sm font-medium text-ink-600 hover:bg-ink-100 hover:text-ink-800 transition-colors"
-                  }
-                >
-                  {t.key === "custom" ? <Calendar className="w-3.5 h-3.5" /> : null}
-                  <span>{t.label}</span>
-                </button>
-              );
-            })}
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex flex-wrap items-center gap-1">
+              {(
+                [
+                  { key: "1d", label: "今天" },
+                  { key: "7d", label: "近7天" },
+                  { key: "14d", label: "近14天" },
+                  { key: "30d", label: "近30天" },
+                  { key: "custom", label: "自定义" },
+                ] as const
+              ).map((t) => {
+                const isActive = timeRange === t.key;
+                return (
+                  <button
+                    key={t.key}
+                    onClick={() => setTimeRange(t.key)}
+                    className={
+                      isActive
+                        ? "inline-flex items-center gap-1 px-3 py-1.5 rounded-md text-sm font-medium bg-brand-700 text-white shadow-sm"
+                        : "inline-flex items-center gap-1 px-3 py-1.5 rounded-md text-sm font-medium text-ink-600 hover:bg-ink-100 hover:text-ink-800 transition-colors"
+                    }
+                  >
+                    {t.key === "custom" ? <Calendar className="w-3.5 h-3.5" /> : null}
+                    <span>{t.label}</span>
+                  </button>
+                );
+              })}
+            </div>
+            <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-brand-50 border border-brand-200/60">
+              <Filter className="w-3.5 h-3.5 text-brand-600" />
+              <span className="text-xs text-brand-700">
+                匹配结果：<span className="font-semibold tabular-nums">{filteredRecords.length}</span> 条
+              </span>
+            </div>
           </div>
 
           <div className="flex flex-col lg:flex-row lg:items-center gap-3">
@@ -2475,7 +2667,7 @@ function RecordsTab() {
               <input
                 type="text"
                 className="input-base !pl-9"
-                placeholder="搜索用户/部门/备注/事件ID"
+                placeholder="搜索对象/处置人/变更内容"
                 value={searchText}
                 onChange={(e) => setSearchText(e.target.value)}
               />
@@ -2522,7 +2714,7 @@ function RecordsTab() {
                 <ChevronDown className="absolute right-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-ink-400 pointer-events-none" />
               </div>
 
-              <button className="btn-ghost">
+              <button className="btn-ghost" onClick={handleExport}>
                 <FileDown className="w-4 h-4" />
                 <span>导出</span>
               </button>
@@ -2555,6 +2747,8 @@ function RecordsTab() {
               const targetDept = u?.departmentName || (r.targetName.includes(" / ") ? r.targetName.split(" / ")[1] || "" : "");
               const dispTargetName = r.targetName.split(" / ")[0];
               const riskIp = ev?.ip;
+              const userLoginForApp = u ? mockLoginLogs.find((l) => l.userId === u.id) : null;
+              const appId = userLoginForApp?.appId || "";
               return (
                 <tr key={r.id} className="table-row">
                   <td className="table-td">
@@ -2583,7 +2777,7 @@ function RecordsTab() {
                         <div className="text-xs text-ink-500">{targetDept}</div>
                       </div>
                       <button
-                        onClick={() => handleJumpAuditByUser(dispTargetName)}
+                        onClick={() => handleJumpAuditByUser(dispTargetName, appId)}
                         className="inline-flex items-center justify-center w-6 h-6 rounded-md text-brand-500 hover:bg-brand-50 hover:text-brand-600 transition-colors shrink-0"
                         title={`查看用户 ${dispTargetName} 的审计会话日志`}
                       >
@@ -2604,7 +2798,7 @@ function RecordsTab() {
                           </span>
                           {riskIp && (
                             <button
-                              onClick={() => handleJumpAuditByIp(riskIp)}
+                              onClick={() => handleJumpAuditByIp(riskIp, appId)}
                               className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-mono text-ink-600 hover:bg-brand-50 hover:text-brand-600 border border-ink-200 hover:border-brand-200 transition-colors"
                               title={`查看 IP ${riskIp} 的审计会话日志`}
                             >
@@ -2638,7 +2832,7 @@ function RecordsTab() {
                       <span className="font-mono text-xs text-ink-600">{r.ip || "-"}</span>
                       {r.ip && (
                         <button
-                          onClick={() => handleJumpAuditByIp(r.ip)}
+                          onClick={() => handleJumpAuditByIp(r.ip, appId)}
                           className="inline-flex items-center justify-center w-6 h-6 rounded-md text-brand-500 hover:bg-brand-50 hover:text-brand-600 transition-colors shrink-0"
                           title={`查看 IP ${r.ip} 的审计会话日志`}
                         >

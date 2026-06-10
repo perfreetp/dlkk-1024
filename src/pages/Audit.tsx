@@ -1,5 +1,5 @@
-import { useState, useMemo } from "react";
-import { useNavigate } from "react-router-dom";
+import { useState, useMemo, useEffect } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { useAppStore } from "@/stores/useAppStore";
 import { Modal, toast } from "@/components/ui/Modal";
 import {
@@ -207,6 +207,7 @@ export default function Audit() {
 }
 
 function LoginLogsTab() {
+  const [searchParams, setSearchParams] = useSearchParams();
   const [view, setView] = useState<LoginLogView>("table");
   const [searchText, setSearchText] = useState("");
   const [timeRange, setTimeRange] = useState("7d");
@@ -214,6 +215,45 @@ function LoginLogsTab() {
   const [appFilter, setAppFilter] = useState("");
   const [deviceFilter, setDeviceFilter] = useState<"all" | DeviceType>("all");
   const [currentPage, setCurrentPage] = useState(1);
+  const [appliedFromUrl, setAppliedFromUrl] = useState(false);
+
+  useEffect(() => {
+    const userParam = searchParams.get("user");
+    const ipParam = searchParams.get("ip");
+    const appParam = searchParams.get("app");
+    const statusParam = searchParams.get("status");
+
+    const appliedConditions: string[] = [];
+
+    if (userParam || ipParam) {
+      const searchParts: string[] = [];
+      if (userParam) {
+        searchParts.push(userParam);
+        appliedConditions.push(`用户: ${userParam}`);
+      }
+      if (ipParam) {
+        searchParts.push(ipParam);
+        appliedConditions.push(`IP: ${ipParam}`);
+      }
+      setSearchText(searchParts.join(" "));
+    }
+    if (appParam) {
+      setAppFilter(appParam);
+      const app = mockApplications.find((a) => a.id === appParam);
+      appliedConditions.push(`应用: ${app?.name || appParam}`);
+    }
+    if (statusParam) {
+      if (statusParam === "fail" || statusParam === "success") {
+        setStatusFilter(statusParam);
+        appliedConditions.push(`状态: ${statusParam === "fail" ? "失败" : "成功"}`);
+      }
+    }
+
+    if (appliedConditions.length > 0) {
+      setAppliedFromUrl(true);
+      toast.info(`已根据URL参数设置筛选：${appliedConditions.join("，")}`);
+    }
+  }, [searchParams]);
 
   const filteredLogs = useMemo(() => {
     return mockLoginLogs.filter((log) => {
@@ -241,6 +281,11 @@ function LoginLogsTab() {
     setAppFilter("");
     setDeviceFilter("all");
     setCurrentPage(1);
+    if (appliedFromUrl || searchParams.size > 0) {
+      setSearchParams({});
+      setAppliedFromUrl(false);
+      toast.success("已清除所有筛选条件（含URL参数）");
+    }
   };
 
   return (
@@ -377,8 +422,12 @@ function LoginLogsTable({ logs }: { logs: LoginLog[] }) {
   const navigate = useNavigate();
 
   const handleInitiateRisk = (log: LoginLog) => {
-    toast.info(`已从登录日志发起风险处置：用户 ${log.userName}，IP ${log.ip}`);
-    navigate("/risk");
+    const params = new URLSearchParams();
+    params.set("userId", log.userId);
+    params.set("ip", log.ip);
+    params.set("app", log.appId);
+    toast.info(`已从登录日志发起风险处置：用户 ${log.userName}，IP ${log.ip}，应用 ${log.appName}`);
+    navigate(`/risk?${params.toString()}`);
   };
 
   return (
@@ -507,8 +556,12 @@ function LoginLogsTimeline({ logs }: { logs: LoginLog[] }) {
   const navigate = useNavigate();
 
   const handleInitiateRisk = (log: LoginLog) => {
-    toast.info(`已从登录日志发起风险处置：用户 ${log.userName}，IP ${log.ip}`);
-    navigate("/risk");
+    const params = new URLSearchParams();
+    params.set("userId", log.userId);
+    params.set("ip", log.ip);
+    params.set("app", log.appId);
+    toast.info(`已从登录日志发起风险处置：用户 ${log.userName}，IP ${log.ip}，应用 ${log.appName}`);
+    navigate(`/risk?${params.toString()}`);
   };
 
   return (
